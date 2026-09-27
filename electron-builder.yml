@@ -1,0 +1,42 @@
+# electron-builder configuration. `npm run dist` builds the Windows NSIS installer.
+appId: com.wanderingpaladin.emailsender
+productName: Email Sender
+copyright: Copyright © 2026 WanderingPaladin
+
+directories:
+  output: release/${version}
+  buildResources: assets
+
+files:
+  - out/**
+  - package.json
+  - "!**/*.map"
+
+asar: true
+
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: assets/icon.ico
+  artifactName: ${productName}-Setup-${version}.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: Email Sender
+  # Keep settings, encrypted credentials and logs when the app is uninstalled.
+  deleteAppDataOnUninstall: false
+
+mac:
+  target: [dmg]
+  icon: assets/icon.png
+  category: public.app-category.productivity
+
+linux:
+  target: [AppImage]
+  icon: assets/icon.png
+  category: Office

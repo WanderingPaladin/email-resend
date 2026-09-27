@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { CampaignStartInput } from '@shared/schemas';
 import type { CampaignProgress, CampaignSummary } from '@shared/types';
 import { api } from '@/lib/utils';
@@ -9,6 +9,9 @@ export function useCampaign(onFinished?: () => void) {
   const [progress, setProgress] = useState<CampaignProgress | null>(null);
   const [summary, setSummary] = useState<CampaignSummary | null>(null);
   const [startedAt, setStartedAt] = useState<string>('');
+  // A short dry run can finish before start() resolves; remember completions so we do not
+  // flip back to "running" afterwards.
+  const completed = useRef(new Set<string>());
 
   useEffect(() => {
     // Pick up a campaign that is already running (e.g. after a renderer reload).
@@ -23,6 +26,7 @@ export function useCampaign(onFinished?: () => void) {
 
     const offProgress = api().campaign.onProgress((p) => setProgress(p));
     const offComplete = api().campaign.onComplete((s) => {
+      completed.current.add(s.campaignId);
       setSummary(s);
       setRunning(false);
       onFinished?.();
@@ -38,7 +42,7 @@ export function useCampaign(onFinished?: () => void) {
     setProgress(null);
     setStartedAt(new Date().toISOString());
     const result = await api().campaign.start(input);
-    setRunning(true);
+    if (!completed.current.has(result.campaignId)) setRunning(true);
     return result;
   }, []);
 

@@ -1,6 +1,6 @@
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
-import { app, BrowserWindow, dialog, Menu, safeStorage, session, shell, type MenuItemConstructorOptions } from 'electron';
+import { app, BrowserWindow, dialog, Menu, session, shell, type MenuItemConstructorOptions } from 'electron';
 import { APP_NAME } from '../shared/constants';
 import { createAppContext, type AppContext } from './app-context';
 import { registerCampaignIpc } from './ipc/campaign.ipc';
@@ -8,6 +8,7 @@ import { registerConfigIpc } from './ipc/config.ipc';
 import { registerGoogleIpc } from './ipc/google.ipc';
 import type { IpcDeps } from './ipc/handle';
 import { registerLogsIpc } from './ipc/logs.ipc';
+import { safeStorageCipher } from './services/secret-cipher';
 
 const isDev = !app.isPackaged;
 const devServerUrl = process.env['ELECTRON_RENDERER_URL'];
@@ -70,10 +71,8 @@ function startup(): void {
   const { logger } = ctx;
   logger.info('app', 'Application started', { version: app.getVersion(), platform: process.platform, packaged: app.isPackaged });
 
-  if (!safeStorage.isEncryptionAvailable()) {
+  if (!safeStorageCipher.isAvailable()) {
     logger.warn('config', 'OS secure storage is not available; credentials cannot be saved until it is');
-  } else if (process.platform === 'linux' && safeStorage.getSelectedStorageBackend() === 'basic_text') {
-    logger.warn('config', 'No OS keyring detected; credentials are only obfuscated. Install gnome-keyring or KWallet for real encryption.');
   }
 
   process.on('uncaughtException', (error) => logger.error('app', 'Uncaught exception', { reason: error.message }));
