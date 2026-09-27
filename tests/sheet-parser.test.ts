@@ -46,7 +46,7 @@ describe('header parsing', () => {
 
   it('reports missing required and tracking columns', () => {
     const map = buildHeaderMap(['Email', 'TAG']);
-    expect(missingRequiredColumns(map)).toEqual(['first_name']);
+    expect(missingRequiredColumns(map)).toEqual(['first_name or Name']);
     expect(missingTrackingColumns(map)).toEqual(['send_status', 'campaign_id', 'sent_at', 'resend_email_id', 'last_error']);
   });
 

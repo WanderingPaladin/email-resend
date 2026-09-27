@@ -20,6 +20,17 @@ export function normalizeHeader(header: string): string {
   return header.trim().toLowerCase();
 }
 
+/**
+ * Alternative header names. When the canonical column is absent, the first alias present is
+ * used for reading and for status writes, e.g. a sheet with "Batch Flag" instead of "tag".
+ */
+export const COLUMN_ALIASES: Record<string, readonly string[]> = {
+  tag: ['batch flag', 'batch_flag'],
+};
+
+/** Headers holding a full name, used to derive first_name/last_name when those columns are absent. */
+export const FULL_NAME_HEADERS = ['name', 'full name', 'full_name'] as const;
+
 /** Maps normalized header name → zero-based column index. The first occurrence wins. */
 export function buildHeaderMap(headerRow: readonly unknown[]): HeaderMap {
   const map: HeaderMap = new Map();
@@ -27,11 +38,37 @@ export function buildHeaderMap(headerRow: readonly unknown[]): HeaderMap {
     const name = normalizeHeader(String(cell ?? ''));
     if (name && !map.has(name)) map.set(name, index);
   });
+  for (const [canonical, aliases] of Object.entries(COLUMN_ALIASES)) {
+    if (map.has(canonical)) continue;
+    const alias = aliases.find((a) => map.has(a));
+    if (alias !== undefined) map.set(canonical, map.get(alias) as number);
+  }
   return map;
 }
 
+function fullNameColumn(headers: HeaderMap): string | undefined {
+  return FULL_NAME_HEADERS.find((h) => headers.has(h));
+}
+
+/** "Maria Lopez" → ["Maria", "Lopez"]; "Lopez, Maria" → ["Maria", "Lopez"]. */
+export function splitFullName(fullName: string): { firstName: string; lastName: string } {
+  const value = fullName.trim().replace(/\s+/g, ' ');
+  if (!value) return { firstName: '', lastName: '' };
+  if (value.includes(',')) {
+    const [last = '', rest = ''] = value.split(',', 2).map((p) => p.trim());
+    const [first = '', ...more] = rest.split(' ');
+    return { firstName: first, lastName: [...more, last].filter(Boolean).join(' ') };
+  }
+  const [first = '', ...rest] = value.split(' ');
+  return { firstName: first, lastName: rest.join(' ') };
+}
+
+const HEADER_HINTS: Record<string, string> = { first_name: 'first_name or Name', tag: 'tag or Batch Flag' };
+
 export function missingRequiredColumns(headers: HeaderMap): string[] {
-  return REQUIRED_COLUMNS.filter((c) => !headers.has(c));
+  return REQUIRED_COLUMNS.filter((c) => !headers.has(c) && !(c === 'first_name' && fullNameColumn(headers))).map(
+    (c) => HEADER_HINTS[c] ?? c,
+  );
 }
 
 export function missingTrackingColumns(headers: HeaderMap): string[] {
@@ -53,14 +90,16 @@ function cell(row: readonly unknown[], headers: HeaderMap, name: string): string
  */
 export function parseContacts(values: readonly (readonly unknown[])[]): { headers: HeaderMap; contacts: ContactRow[] } {
   const headers = buildHeaderMap(values[0] ?? []);
+  const nameColumn = headers.has('first_name') ? undefined : fullNameColumn(headers);
   const contacts: ContactRow[] = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i] ?? [];
     if (row.every((c) => String(c ?? '').trim() === '')) continue;
+    const derived = nameColumn ? splitFullName(cell(row, headers, nameColumn)) : null;
     contacts.push({
       sheetRow: i + 1,
-      firstName: cell(row, headers, 'first_name'),
-      lastName: cell(row, headers, 'last_name'),
+      firstName: derived ? derived.firstName : cell(row, headers, 'first_name'),
+      lastName: headers.has('last_name') || !derived ? cell(row, headers, 'last_name') : derived.lastName,
       email: cell(row, headers, 'email'),
       company: cell(row, headers, 'company'),
       tag: cell(row, headers, 'tag'),

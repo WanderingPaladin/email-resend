@@ -244,7 +244,7 @@ export function CampaignPage({
       <Card>
         <CardHeader
           title="Contacts"
-          description={`Rows tagged New in "${config?.settings.worksheetName ?? 'Emails'}", in sheet order.`}
+          description={`Rows whose tag (or Batch Flag) is New in "${config?.settings.worksheetName ?? 'Emails'}", in sheet order.`}
           actions={
             <Button size="sm" variant="outline" onClick={() => void loadPreview()} loading={previewing}>
               Preview Contacts

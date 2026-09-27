@@ -118,6 +118,11 @@ Row 1 must contain headers. Columns are matched by name (case-insensitive, trimm
 | `resend_email_id` | tracking | yes | ID returned by Resend |
 | `last_error` | tracking | yes | Sanitized error message |
 
+Alternative layout: instead of `first_name` you can have a `Name` column (full name). The first
+word becomes `{{first_name}}` and the rest `{{last_name}}` ("Lopez, Maria" is also understood).
+Instead of `tag` you can use a `Batch Flag` column; the app reads `New` from it and writes
+`Processing`, `Sent` or `Failed` back to it. Other columns (Location, Country, …) are ignored and never changed.
+
 If tracking columns are missing, the app offers to add them to the right of your existing headers
 (from Settings → Test Google Sheets, or in the send confirmation). Nothing else in the sheet is moved.
 
