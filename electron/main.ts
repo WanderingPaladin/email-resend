@@ -8,6 +8,7 @@ import { registerConfigIpc } from './ipc/config.ipc';
 import { registerGoogleIpc } from './ipc/google.ipc';
 import type { IpcDeps } from './ipc/handle';
 import { registerLogsIpc } from './ipc/logs.ipc';
+import { useChromiumNetworkStack } from './services/network';
 import { safeStorageCipher } from './services/secret-cipher';
 
 const isDev = !app.isPackaged;
@@ -66,6 +67,8 @@ if (!app.requestSingleInstanceLock()) {
 }
 
 function startup(): void {
+  // Google and Resend requests go through Chromium so Windows proxy/VPN/DNS settings apply.
+  useChromiumNetworkStack();
   // 2. Logger (inside the app context) and 3. safe configuration.
   ctx = createAppContext();
   const { logger } = ctx;

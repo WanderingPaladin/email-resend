@@ -34,11 +34,16 @@ export interface SheetsGateway {
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
 }
 
-export function createSheetsClient(credentials: GoogleCredentials): SheetsGateway {
+/**
+ * @param fetchImplementation optional fetch used for both the OAuth token request and API calls.
+ *   The app passes Electron's `net.fetch` so the OS proxy/DNS settings apply (see network.ts).
+ */
+export function createSheetsClient(credentials: GoogleCredentials, fetchImplementation?: typeof fetch): SheetsGateway {
   const auth = new google.auth.JWT({
     email: credentials.clientEmail,
     key: credentials.privateKey,
     scopes: ['https://www.googleapis.com/auth/spreadsheets'],
+    ...(fetchImplementation ? { transporterOptions: { fetchImplementation } } : {}),
   });
   const sheets = google.sheets({ version: 'v4', auth });
 
@@ -104,7 +109,11 @@ export function isRetryableGoogleError(error: unknown): boolean {
   const status = statusOf(error);
   if (status === 429 || status === 500 || status === 502 || status === 503 || status === 504) return true;
   const code = (error as GaxiosLikeError)?.code;
-  return typeof code === 'string' && NETWORK_CODES.includes(code);
+  if (typeof code === 'string' && NETWORK_CODES.includes(code)) return true;
+  // Chromium network errors (Electron net.fetch), e.g. net::ERR_CONNECTION_RESET.
+  return /net::ERR_(CONNECTION_(RESET|CLOSED|TIMED_OUT|ABORTED)|NETWORK_CHANGED|TIMED_OUT|INTERNET_DISCONNECTED)/.test(
+    String((error as GaxiosLikeError)?.message ?? ''),
+  );
 }
 
 export class GoogleSheetsError extends Error {
@@ -149,8 +158,13 @@ export function normalizeGoogleError(error: unknown, context: { serviceAccountEm
   if (status === 429) {
     return new GoogleSheetsError('Google Sheets quota exceeded. Wait a minute and try again.', 'quota');
   }
-  if (typeof code === 'string' && NETWORK_CODES.includes(code)) {
-    return new GoogleSheetsError(`Could not reach Google (${code}). Check your internet connection.`, 'network');
+  const chromiumError = /net::(ERR_[A-Z_]+)/.exec(message)?.[1];
+  if ((typeof code === 'string' && NETWORK_CODES.includes(code)) || chromiumError) {
+    return new GoogleSheetsError(
+      `Could not reach Google (${chromiumError ?? code}). Check that this computer can open https://sheets.googleapis.com in a browser. ` +
+        'If you use a VPN, proxy, firewall or antivirus web filter, allow googleapis.com and oauth2.googleapis.com.',
+      'network',
+    );
   }
   if (status && status >= 500) {
     return new GoogleSheetsError(`Google Sheets is temporarily unavailable (HTTP ${status}). Try again shortly.`, 'server');

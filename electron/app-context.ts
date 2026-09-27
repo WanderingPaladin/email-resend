@@ -8,6 +8,7 @@ import { ConfigService } from './services/config.service';
 import { createSheetsClient, GoogleSheetsService } from './services/google-sheets.service';
 import { createFileJournal } from './services/journal.service';
 import { LoggerService } from './services/logger.service';
+import { chromiumFetch } from './services/network';
 import { RecoveryService } from './services/recovery.service';
 import { createResendClient, ResendService } from './services/resend.service';
 import { safeStorageCipher } from './services/secret-cipher';
@@ -40,7 +41,7 @@ export function createAppContext(): AppContext {
       throw new Error('Google credentials are not configured. Import the service account JSON in Settings.');
     }
     return new GoogleSheetsService(
-      createSheetsClient(credentials),
+      createSheetsClient(credentials, chromiumFetch),
       {
         spreadsheetId: settings.spreadsheetId,
         worksheetName: settings.worksheetName,
