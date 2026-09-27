@@ -32,6 +32,8 @@ export interface SheetsGateway {
   getSpreadsheet(spreadsheetId: string): Promise<{ title: string; sheets: { title: string; rowCount: number }[] }>;
   getValues(spreadsheetId: string, range: string): Promise<string[][]>;
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
+  /** Adds columns to the worksheet's grid until it has at least `minColumns`. Google rejects writes outside the grid. */
+  ensureColumnCount(spreadsheetId: string, worksheetName: string, minColumns: number): Promise<void>;
 }
 
 /**
@@ -78,6 +80,22 @@ export function createSheetsClient(credentials: GoogleCredentials, fetchImplemen
           // RAW: values are stored literally, so an error message starting with "=" can never become a formula.
           valueInputOption: 'RAW',
           data: writes.map((w) => ({ range: w.range, values: [[w.value]] })),
+        },
+      });
+    },
+    async ensureColumnCount(spreadsheetId, worksheetName, minColumns) {
+      const res = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.columnCount',
+      });
+      const props = (res.data.sheets ?? []).find((s) => s.properties?.title === worksheetName)?.properties;
+      if (props?.sheetId === undefined || props.sheetId === null) return;
+      const columnCount = props.gridProperties?.columnCount ?? 0;
+      if (columnCount >= minColumns) return;
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{ appendDimension: { sheetId: props.sheetId, dimension: 'COLUMNS', length: minColumns - columnCount } }],
         },
       });
     },
@@ -332,6 +350,10 @@ export class GoogleSheetsService {
       range: `${this.sheetRange}!${columnToLetter(lastUsed + 1 + i)}1`,
       value: name,
     }));
+    const neededColumns = lastUsed + 1 + missing.length;
+    await this.call('grid resize', () =>
+      this.gateway.ensureColumnCount(this.target.spreadsheetId, this.target.worksheetName, neededColumns),
+    );
     await this.call('header write', () => this.gateway.batchWrite(this.target.spreadsheetId, writes));
     this.logger.info('google', `Added tracking columns: ${missing.join(', ')}`);
     return missing;

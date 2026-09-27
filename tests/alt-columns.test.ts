@@ -52,6 +52,8 @@ describe('Name / Batch Flag layout', () => {
 
   it('runs a campaign that personalizes from Name and writes status to Batch Flag', async () => {
     const h = createHarness([[...HEADERS], row('Maria Lopez', 'maria@example.com', 'New'), row('', 'noname@example.com', 'New')]);
+    // The grid is exactly as wide as the headers (10 columns), like a copied sheet.
+    h.gateway.columnCount = 10;
     const summaries: unknown[] = [];
     const service = new CampaignService({
       logger: h.logger,
@@ -83,5 +85,7 @@ describe('Name / Batch Flag layout', () => {
     expect(h.gateway.rows[0]?.slice(10)).toEqual(['send_status', 'campaign_id', 'sent_at', 'resend_email_id', 'last_error']);
     expect(h.gateway.rowObject(2)).toMatchObject({ 'batch flag': 'Sent', send_status: 'sent', name: 'Maria Lopez', country: 'Peru' });
     expect(h.gateway.rowObject(2)['tag']).toBeUndefined();
+    expect(h.gateway.columnCount).toBe(15);
+    expect(h.gateway.gridResizes).toBe(1);
   });
 });
