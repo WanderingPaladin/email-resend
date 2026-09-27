@@ -53,7 +53,7 @@ npm run dist
 ```
 
 Run this on Windows. The installer is written to `release/<version>/Email Sender-Setup-<version>.exe`.
-Building the Windows installer from Linux or macOS requires Wine, so use a Windows machine or the
+Building the Windows installer from Linux or macOS requires Wine (on Linux both `wine64` and `wine32:i386`), so use a Windows machine or the
 CI workflow: in GitHub, open **Actions → CI → Run workflow** and download the `windows-installer`
 artifact. Pushing a tag such as `v0.1.0` also builds it.
 
