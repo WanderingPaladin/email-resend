@@ -52,10 +52,12 @@ Type-checks and bundles the main process, preload and renderer into `out/`.
 npm run dist
 ```
 
-Run this on Windows. The installer is written to `release/<version>/Email Sender-Setup-<version>.exe`.
+Run this on Windows. The installer is written to `release/<version>/Email Sender-Setup-<version>.exe`,
+and the same app without an installer to `release/<version>/win-unpacked/` (run `Email Sender.exe` there).
 Building the Windows installer from Linux or macOS requires Wine (on Linux both `wine64` and `wine32:i386`), so use a Windows machine or the
 CI workflow: in GitHub, open **Actions → CI → Run workflow** and download the `windows-installer`
-artifact. Pushing a tag such as `v0.1.0` also builds it.
+artifact, or `windows-app-no-install` to run the app without installing it (unzip it and run `Email Sender.exe`;
+keep the whole folder together). Pushing a tag such as `v0.1.0` also builds it.
 
 Other platforms: `npm run dist:mac` (dmg) and `npm run dist:linux` (AppImage).
 

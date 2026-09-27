@@ -39,4 +39,9 @@ jobs:
       - uses: actions/upload-artifact@v4
         with:
           name: windows-installer
-          path: release/**/*.exe
+          path: release/*/*-Setup-*.exe
+      # The same app without an installer: unzip and run "Email Sender.exe".
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-app-no-install
+          path: release/*/win-unpacked/
