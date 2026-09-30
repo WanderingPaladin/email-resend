@@ -18,12 +18,16 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
   const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [test, setTest] = useState<GoogleTestResult | null>(null);
 
+  // Re-seed only when this section's stored values change, so saving another section
+  // does not discard what is typed here.
+  const stored = config?.settings;
   useEffect(() => {
-    if (!config) return;
-    setSpreadsheetId(config.settings.spreadsheetId);
-    setWorksheetName(config.settings.worksheetName);
-    setServiceAccountEmail(config.settings.serviceAccountEmail);
-  }, [config]);
+    if (!stored) return;
+    setSpreadsheetId(stored.spreadsheetId);
+    setWorksheetName(stored.worksheetName);
+    setServiceAccountEmail(stored.serviceAccountEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stored?.spreadsheetId, stored?.worksheetName, stored?.serviceAccountEmail]);
 
   const run = async (kind: typeof busy, fn: () => Promise<void>) => {
     setBusy(kind);

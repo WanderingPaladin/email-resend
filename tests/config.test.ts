@@ -115,3 +115,15 @@ describe('ConfigService', () => {
     expect(config.getSettings()).toMatchObject({ batchSize: 100, fromName: 'Julio' });
   });
 });
+
+describe('saving one settings section', () => {
+  it('keeps the other sections unchanged', () => {
+    const config = new ConfigService(createMemorySettingsRepository(), fakeCipher(), new MemoryLogger());
+    const save = (settings: unknown) => config.save(saveConfigInputSchema.parse({ settings }));
+    save({ spreadsheetId: 'sheet-123', worksheetName: 'My Emails' });
+    save({ emailProvider: 'elasticemail', fromName: 'Julio', fromEmail: 'julio@example.com' });
+    expect(config.getSettings()).toMatchObject({ spreadsheetId: 'sheet-123', worksheetName: 'My Emails', emailProvider: 'elasticemail' });
+    save({ spreadsheetId: 'sheet-456' });
+    expect(config.getSettings()).toMatchObject({ spreadsheetId: 'sheet-456', emailProvider: 'elasticemail', fromEmail: 'julio@example.com' });
+  });
+});

@@ -45,12 +45,16 @@ export function EmailProviderSettings({ configHook, onSaved }: { configHook: Con
   const [busy, setBusy] = useState<'' | 'save' | 'validate' | 'remove'>('');
   const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'warning'; text: string } | null>(null);
 
+  // Re-seed only when this section's stored values change, so saving another section
+  // does not discard what is typed here.
+  const stored = config?.settings;
   useEffect(() => {
-    if (!config) return;
-    setProvider(config.settings.emailProvider);
-    setFromName(config.settings.fromName);
-    setFromEmail(config.settings.fromEmail);
-  }, [config]);
+    if (!stored) return;
+    setProvider(stored.emailProvider);
+    setFromName(stored.fromName);
+    setFromEmail(stored.fromEmail);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stored?.emailProvider, stored?.fromName, stored?.fromEmail]);
 
   const spec = PROVIDERS[provider];
   const label = EMAIL_PROVIDER_LABELS[provider];

@@ -52,6 +52,17 @@ export const settingsSchema = z.object({
 export type Settings = z.infer<typeof settingsSchema>;
 
 /**
+ * A partial settings update. Built from the field schemas without their defaults: Zod 4's
+ * `.partial()` still fills omitted fields with defaults, so saving one Settings section
+ * would reset every other section.
+ */
+export const settingsPatchSchema = z.object(
+  Object.fromEntries(
+    Object.entries(settingsSchema.shape).map(([key, field]) => [key, field.unwrap().optional()]),
+  ) as { [K in keyof typeof settingsSchema.shape]: z.ZodOptional<ReturnType<(typeof settingsSchema.shape)[K]['unwrap']>> },
+);
+
+/**
  * Secrets are write-only from the renderer:
  * - string  → replace the stored secret
  * - null    → delete the stored secret
@@ -60,7 +71,7 @@ export type Settings = z.infer<typeof settingsSchema>;
 const secretInput = z.string().trim().min(1).max(20_000).nullable().optional();
 
 export const saveConfigInputSchema = z.object({
-  settings: settingsSchema.partial().optional(),
+  settings: settingsPatchSchema.optional(),
   resendApiKey: secretInput,
   elasticEmailApiKey: secretInput,
   mailjetApiKey: secretInput,

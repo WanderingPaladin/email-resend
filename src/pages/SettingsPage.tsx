@@ -80,13 +80,15 @@ function CampaignDefaults({ configHook }: { configHook: ConfigHook }) {
   const [message, setMessage] = useState<{ tone: 'success' | 'error'; text: string } | null>(null);
   const [saving, setSaving] = useState(false);
 
+  const stored = config?.settings;
   useEffect(() => {
-    if (!config) return;
-    setBatchSize(String(config.settings.batchSize));
-    setConcurrency(String(config.settings.concurrency));
-    setSendsPerSecond(String(config.settings.sendsPerSecond));
-    setFirstNameFallback(config.settings.firstNameFallback);
-  }, [config]);
+    if (!stored) return;
+    setBatchSize(String(stored.batchSize));
+    setConcurrency(String(stored.concurrency));
+    setSendsPerSecond(String(stored.sendsPerSecond));
+    setFirstNameFallback(stored.firstNameFallback);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [stored?.batchSize, stored?.concurrency, stored?.sendsPerSecond, stored?.firstNameFallback]);
 
   const onSave = async () => {
     setSaving(true);
