@@ -12,7 +12,7 @@ import type {
   PreviewResult,
   RecoveryApplyResult,
   RecoveryState,
-  ResendValidationResult,
+  MailerValidationResult,
   TestEmailResult,
 } from './types';
 
@@ -35,11 +35,11 @@ export interface EmailAppApi {
   };
   google: {
     testConnection(): Promise<GoogleTestResult>;
-    initializeTrackingColumns(): Promise<{ added: string[] }>;
     previewContacts(batchSize: number): Promise<PreviewResult>;
   };
-  resend: {
-    validate(): Promise<ResendValidationResult>;
+  mailer: {
+    /** Checks the selected provider's credentials without sending an email. */
+    validate(): Promise<MailerValidationResult>;
   };
   campaign: {
     sendTest(input: SendTestInput): Promise<TestEmailResult>;

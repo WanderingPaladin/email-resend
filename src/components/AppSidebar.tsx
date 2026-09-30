@@ -27,7 +27,7 @@ export function AppSidebar({
     <aside className="flex w-52 shrink-0 flex-col border-r border-slate-200 bg-white">
       <div className="px-5 py-5">
         <div className="text-base font-semibold tracking-tight">Email Sender</div>
-        <div className="text-xs text-slate-500">Google Sheets + Resend</div>
+        <div className="text-xs text-slate-500">Google Sheets + Email</div>
       </div>
       <nav className="flex-1 space-y-0.5 px-3">
         {items.map((item) => (

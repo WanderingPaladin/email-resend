@@ -14,7 +14,7 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
   // The stored private key is never sent to the renderer. This field only accepts a new one.
   const [privateKey, setPrivateKey] = useState('');
-  const [busy, setBusy] = useState<'' | 'save' | 'import' | 'test' | 'init'>('');
+  const [busy, setBusy] = useState<'' | 'save' | 'import' | 'test'>('');
   const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'warning'; text: string } | null>(null);
   const [test, setTest] = useState<GoogleTestResult | null>(null);
 
@@ -62,13 +62,6 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
       setTest(null);
       const result = await api().google.testConnection();
       setTest(result);
-    });
-
-  const onInit = () =>
-    run('init', async () => {
-      const { added } = await api().google.initializeTrackingColumns();
-      setMessage({ tone: 'success', text: added.length ? `Added columns: ${added.join(', ')}` : 'All tracking columns already exist.' });
-      setTest(await api().google.testConnection());
     });
 
   return (
@@ -120,23 +113,9 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
         {message && <Alert tone={message.tone}>{message.text}</Alert>}
         {test && (
           <Alert tone="success" title="Connected successfully.">
-            {`Spreadsheet: ${test.spreadsheetTitle}\nWorksheet: ${test.worksheetName}\nRows: ${test.rowCount.toLocaleString()}\nNew: ${test.newCount.toLocaleString()}`}
+            {`Spreadsheet: ${test.spreadsheetTitle}\nWorksheet: ${test.worksheetName}\nRows: ${test.rowCount.toLocaleString()}\nNew: ${test.newCount.toLocaleString()}\nColumns used: ${test.columns.name} (name), ${test.columns.email} (email), ${test.columns.status} (status). Other columns are ignored.`}
           </Alert>
         )}
-        {test && test.missingTrackingColumns.length > 0 && (
-          <Alert
-            tone="warning"
-            title="Tracking columns are missing"
-            actions={
-              <Button size="sm" variant="outline" onClick={onInit} loading={busy === 'init'}>
-                Add Columns
-              </Button>
-            }
-          >
-            {`The app records each send in these columns: ${test.missingTrackingColumns.join(', ')}.\nThey will be added to the right of your existing headers. No data is moved.`}
-          </Alert>
-        )}
-
         <div className="flex gap-2">
           <Button onClick={onSave} loading={busy === 'save'}>
             Save

@@ -1,33 +1,10 @@
 import { Resend } from 'resend';
-import type { ResendValidationResult } from '../../shared/types';
+import type { MailerValidationResult } from '../../shared/types';
 import type { AppLogger } from '../types/logger';
-import { maskEmail, redactText } from './log-format';
-import { sleep } from './retry';
+import { redactText } from './log-format';
+import { BaseMailer, formatFrom, type AttemptResult, type MailerError, type MailerOptions, type OutgoingEmail } from './mailer';
 
-export interface OutgoingEmail {
-  from: string;
-  to: string;
-  subject: string;
-  html: string;
-  text: string;
-  /**
-   * Resend deduplicates requests with the same key for 24 hours, which makes
-   * retrying an ambiguous request safe: it cannot produce a second email.
-   */
-  idempotencyKey?: string;
-}
-
-export type SendResult =
-  | { success: true; id: string }
-  | {
-      success: false;
-      error: string;
-      code: string;
-      /** Resend may have accepted the email; never resend automatically. */
-      ambiguous: boolean;
-      /** Every following send would fail the same way (bad key, quota, sender domain). */
-      fatal: boolean;
-    };
+export type { OutgoingEmail, SendResult } from './mailer';
 
 export interface ResendErrorLike {
   name?: string;
@@ -68,13 +45,7 @@ const FATAL_CODES = new Set([
   'invalid_access',
 ]);
 
-export interface NormalizedResendError {
-  code: string;
-  message: string;
-  retryable: boolean;
-  ambiguous: boolean;
-  fatal: boolean;
-}
+export type NormalizedResendError = MailerError;
 
 /** Turns an SDK error object or a thrown exception into a sanitized, classified error. */
 export function normalizeResendError(error: unknown): NormalizedResendError {
@@ -112,89 +83,41 @@ export function normalizeResendError(error: unknown): NormalizedResendError {
   };
 }
 
-export interface ResendServiceOptions {
-  sendsPerSecond: number;
-  maxAttempts?: number;
-  sleepFn?: (ms: number) => Promise<void>;
-  now?: () => number;
-}
+export type ResendServiceOptions = MailerOptions;
 
-/**
- * Wraps the Resend client: throttles requests to stay under Resend's rate limit,
- * retries only when it cannot cause a duplicate, and returns a normalized SendResult.
- */
-export class ResendService {
-  private nextSlot = 0;
-  private readonly sleepFn: (ms: number) => Promise<void>;
-  private readonly now: () => number;
-  private readonly intervalMs: number;
+/** Resend (resend.com). Supports idempotency keys, so ambiguous failures can be retried safely. */
+export class ResendService extends BaseMailer {
+  readonly providerLabel = 'Resend';
+  protected override readonly supportsIdempotency = true;
 
   constructor(
     private readonly client: ResendClientLike,
-    private readonly logger: AppLogger,
-    private readonly options: ResendServiceOptions,
+    logger: AppLogger,
+    options: ResendServiceOptions,
   ) {
-    this.sleepFn = options.sleepFn ?? sleep;
-    this.now = options.now ?? Date.now;
-    this.intervalMs = Math.ceil(1000 / Math.max(1, options.sendsPerSecond));
+    super(logger, options);
   }
 
-  /** Serializes request start times so at most `sendsPerSecond` requests start per second. */
-  private async throttle(): Promise<void> {
-    const now = this.now();
-    const slot = Math.max(now, this.nextSlot);
-    this.nextSlot = slot + this.intervalMs;
-    if (slot > now) await this.sleepFn(slot - now);
-  }
-
-  async sendEmail(email: OutgoingEmail): Promise<SendResult> {
-    const maxAttempts = this.options.maxAttempts ?? 4;
-    let last: NormalizedResendError | null = null;
-
-    for (let attempt = 1; attempt <= maxAttempts; attempt++) {
-      await this.throttle();
-      let normalized: NormalizedResendError;
-      try {
-        const { data, error } = await this.client.emails.send(
-          { from: email.from, to: email.to, subject: email.subject, html: email.html, text: email.text },
-          email.idempotencyKey ? { idempotencyKey: email.idempotencyKey } : undefined,
-        );
-        if (data?.id && !error) return { success: true, id: data.id };
-        normalized = normalizeResendError(error ?? { name: 'unknown_error', message: 'Resend returned no email ID' });
-      } catch (thrown) {
-        normalized = normalizeResendError(thrown);
-      }
-      last = normalized;
-
-      // Ambiguous failures are only retried with an idempotency key, which makes the retry safe.
-      const canRetry = normalized.retryable || (normalized.ambiguous && Boolean(email.idempotencyKey));
-      if (!canRetry || attempt === maxAttempts) break;
-      const delay = normalized.code === 'rate_limit_exceeded' ? 1000 * attempt : 500 * 2 ** attempt;
-      this.logger.warn('resend', 'Resend request failed; retrying', {
-        email: maskEmail(email.to),
-        code: normalized.code,
-        attempt,
-        delayMs: delay,
-      });
-      await this.sleepFn(delay);
+  protected async attempt(email: OutgoingEmail): Promise<AttemptResult> {
+    let response: Awaited<ReturnType<ResendClientLike['emails']['send']>>;
+    try {
+      response = await this.client.emails.send(
+        { from: formatFrom(email.fromName, email.fromEmail), to: email.to, subject: email.subject, html: email.html, text: email.text },
+        email.idempotencyKey ? { idempotencyKey: email.idempotencyKey } : undefined,
+      );
+    } catch (thrown) {
+      return { ok: false, error: normalizeResendError(thrown) };
     }
-
-    const error = last ?? normalizeResendError(null);
-    return {
-      success: false,
-      error: error.message,
-      code: error.code,
-      // A rate-limit or validation error means nothing was sent; everything else stays ambiguous.
-      ambiguous: error.ambiguous,
-      fatal: error.fatal,
-    };
+    const { data, error } = response;
+    if (data?.id && !error) return { ok: true, id: data.id };
+    return { ok: false, error: normalizeResendError(error ?? { name: 'unknown_error', message: 'Resend returned no email ID' }) };
   }
 
   /**
    * Checks the API key without sending an email by listing domains.
    * Sending-only keys cannot list domains; that still proves the key exists.
    */
-  async validateConfiguration(fromEmail: string): Promise<ResendValidationResult> {
+  async validateConfiguration(fromEmail: string): Promise<MailerValidationResult> {
     let response: Awaited<ReturnType<ResendClientLike['domains']['list']>>;
     try {
       response = await this.client.domains.list();

@@ -1,6 +1,6 @@
 import { readFile, stat } from 'node:fs/promises';
 import { app, BrowserWindow, clipboard, dialog } from 'electron';
-import { IPC } from '../../shared/constants';
+import { EMAIL_PROVIDER_LABELS, IPC } from '../../shared/constants';
 import { copyTextInputSchema, saveConfigInputSchema } from '../../shared/schemas';
 import type { AppStatus } from '../../shared/types';
 import type { AppContext } from '../app-context';
@@ -35,7 +35,8 @@ export function registerConfigIpc(ctx: AppContext, deps: IpcDeps): void {
     return {
       version: app.getVersion(),
       googleConfigured: ctx.config.isGoogleConfigured(),
-      resendConfigured: ctx.config.isResendConfigured(),
+      mailerConfigured: ctx.config.isMailerConfigured(),
+      emailProviderLabel: EMAIL_PROVIDER_LABELS[ctx.config.getSettings().emailProvider],
       campaignRunning: ctx.campaign.isCampaignRunning(),
       lastCampaign: history[0] ?? null,
       recentCampaigns: history.slice(0, 10),

@@ -24,17 +24,12 @@ import type {
 } from '../../shared/types';
 import type { SettingsRepository } from '../repositories/settings.repository';
 import type { AppLogger } from '../types/logger';
-import {
-  failedUpdate,
-  releaseUpdate,
-  reviewUpdate,
-  sentUpdate,
-  type GoogleSheetsService,
-  type RowUpdate,
-} from './google-sheets.service';
+import { failedUpdate, releaseUpdate, sentUpdate, type GoogleSheetsService, type RowUpdate } from './google-sheets.service';
 import type { CampaignJournal } from './journal.service';
 import { maskEmail } from './log-format';
-import type { ResendService } from './resend.service';
+import type { Mailer } from './mailer';
+
+export { formatFrom } from './mailer';
 import { findStaleProcessing, selectContacts } from './sheet-parser';
 import { buildVariables, renderEmail, validateTemplate } from './template.service';
 
@@ -51,8 +46,8 @@ export interface CampaignServiceDeps {
   getSettings(): Settings;
   /** Throws a user-facing error when Google is not configured. */
   createSheets(): GoogleSheetsService;
-  /** Throws a user-facing error when Resend is not configured. */
-  createMailer(): ResendService;
+  /** Throws a user-facing error when the selected email provider is not configured. */
+  createMailer(): Mailer;
   newId?: () => string;
   now?: () => Date;
   /** How often buffered sheet status updates are written. */
@@ -66,7 +61,7 @@ interface PreparedCampaign {
   contacts: ContactRow[];
   skipped: SkippedContact[];
   sheets: GoogleSheetsService | null;
-  mailer: ResendService | null;
+  mailer: Mailer | null;
   startedAt: string;
 }
 
@@ -79,7 +74,7 @@ interface RunContext {
   writer: StatusWriter | null;
 }
 
-type WriteKind = 'sent' | 'failed' | 'review';
+type WriteKind = 'sent' | 'failed';
 
 interface QueuedWrite {
   update: RowUpdate;
@@ -144,10 +139,10 @@ class StatusWriter {
  * Orchestrates campaigns: contact selection, reservation, rendering, sending, status updates,
  * progress events and history. Duplicate-send protection lives here:
  * - one campaign at a time (in-memory lock taken synchronously, before any await)
- * - contacts are reserved (tag=Processing) in the sheet before any email is sent
- * - rows with any sign of a previous send are never selected
- * - every send carries an idempotency key (campaignId:row), so API retries cannot duplicate
- * - ambiguous outcomes are parked for manual review instead of retried
+ * - contacts are reserved (Batch Flag = Processing) in the sheet before any email is sent
+ * - only New rows are selected; emails still awaiting manual review are never selected
+ * - retries happen only when they cannot duplicate (rate limits, or provider idempotency keys)
+ * - ambiguous outcomes stay in Processing for manual review instead of being retried
  */
 export class CampaignService {
   private running = false;
@@ -186,7 +181,7 @@ export class CampaignService {
   async previewContacts(batchSize: number): Promise<PreviewResult> {
     const sheets = this.deps.createSheets();
     const snapshot = await sheets.readSheet();
-    const selection = selectContacts(snapshot.contacts, batchSize);
+    const selection = selectContacts(snapshot.contacts, batchSize, this.pendingSentEmails());
     this.deps.logger.info('google', `Found ${selection.totalNew} New contacts`, {
       selected: selection.selected.length,
       skipped: selection.skipped.length,
@@ -200,11 +195,9 @@ export class CampaignService {
         firstName: c.firstName,
         lastName: c.lastName,
         email: c.email,
-        company: c.company,
         tag: c.tag,
       })),
       skipped: selection.skipped,
-      missingTrackingColumns: snapshot.missingTrackingColumns,
       staleProcessingCount: findStaleProcessing(snapshot.contacts).length,
     };
   }
@@ -214,9 +207,10 @@ export class CampaignService {
     if (templateError) throw new Error(templateError);
     const mailer = this.deps.createMailer();
     const rendered = renderEmail(input, { ...TEST_EMAIL_VARIABLES });
-    this.deps.logger.info('resend', 'Sending test email', { to: maskEmail(input.to) });
+    this.deps.logger.info('resend', `Sending test email via ${mailer.providerLabel}`, { to: maskEmail(input.to) });
     const result = await mailer.sendEmail({
-      from: formatFrom(input.fromName, input.fromEmail),
+      fromName: input.fromName,
+      fromEmail: input.fromEmail,
       to: input.to,
       subject: rendered.subject,
       html: rendered.html,
@@ -282,6 +276,11 @@ export class CampaignService {
     return true;
   }
 
+  /** Emails the provider accepted whose row could not be marked Sent; never selected again automatically. */
+  private pendingSentEmails(): Set<string> {
+    return new Set(this.deps.repo.get('manualReview').map((r) => r.email.trim().toLowerCase()));
+  }
+
   // -------------------------------------------------------------------------
 
   private async prepare(input: CampaignStartInput): Promise<PreparedCampaign> {
@@ -305,25 +304,11 @@ export class CampaignService {
       });
     }
 
-    let snapshot = await sheets.readSheet();
-    if (snapshot.missingTrackingColumns.length > 0 && !input.dryRun) {
-      if (!input.initializeTrackingColumns) {
-        throw new Error(
-          `The sheet is missing tracking columns: ${snapshot.missingTrackingColumns.join(', ')}. Confirm that they may be added and try again.`,
-        );
-      }
-      await sheets.initializeTrackingColumns();
-      snapshot = await sheets.readSheet();
-    }
-
-    const selection = selectContacts(snapshot.contacts, batchSize);
+    const snapshot = await sheets.readSheet();
+    const selection = selectContacts(snapshot.contacts, batchSize, this.pendingSentEmails());
     logger.info('campaign', `Found ${selection.totalNew} New contacts`);
     for (const s of selection.skipped) {
-      if (s.reason === 'unsubscribed') {
-        logger.info('campaign', `Skipped unsubscribed contact: ${maskEmail(s.email)}`, { row: s.sheetRow });
-      } else {
-        logger.info('campaign', 'Skipped contact', { row: s.sheetRow, email: maskEmail(s.email), reason: s.detail });
-      }
+      logger.info('campaign', 'Skipped contact', { row: s.sheetRow, email: maskEmail(s.email), reason: s.detail });
     }
     if (selection.selected.length === 0) {
       throw new Error('There are no eligible New contacts to send to.');
@@ -337,7 +322,7 @@ export class CampaignService {
     if (!input.dryRun) {
       this.deps.repo.set('activeCampaign', { campaignId, startedAt });
       this.deps.journal.record({ ts: startedAt, campaignId, event: 'campaign_started' });
-      const failures = await sheets.reserveContacts(contacts, campaignId);
+      const failures = await sheets.reserveContacts(contacts);
       if (failures.length > 0) {
         const failedRows = new Set(failures.map((f) => f.update.sheetRow));
         for (const f of failures) {
@@ -378,6 +363,7 @@ export class CampaignService {
 
     logger.info('campaign', `${input.dryRun ? '[DRY RUN] ' : ''}Campaign started`, {
       campaignId,
+      provider: mailer?.providerLabel ?? '',
       contacts: contacts.length,
       skipped: skipped.length,
       concurrency,
@@ -441,7 +427,7 @@ export class CampaignService {
     // Contacts reserved but never started go back to New: they were definitely not emailed.
     const notStarted = prepared.contacts.filter((c) => results.get(c.sheetRow)?.status === 'not_started');
     if (notStarted.length > 0 && !input.dryRun && prepared.sheets) {
-      const failures = await prepared.sheets.applyRowUpdates(notStarted.map((c) => releaseUpdate(c, campaignId)));
+      const failures = await prepared.sheets.applyRowUpdates(notStarted.map((c) => releaseUpdate(c)));
       logger.info('campaign', `Returned ${notStarted.length - failures.length} unstarted contact(s) to New`);
       for (const f of failures) {
         logger.warn('campaign', 'Could not return unstarted contact to New; it remains in Processing for review', {
@@ -505,7 +491,8 @@ export class CampaignService {
     }
 
     const result = await prepared.mailer.sendEmail({
-      from: formatFrom(input.fromName, input.fromEmail),
+      fromName: input.fromName,
+      fromEmail: input.fromEmail,
       to: contact.email,
       subject: rendered.subject,
       html: rendered.html,
@@ -527,7 +514,7 @@ export class CampaignService {
       logger.info('campaign', 'Email sent', { row: contact.sheetRow, email: masked, resendId: result.id });
       setResult('sent', result.id);
       ctx.progress.sent++;
-      ctx.writer?.enqueue({ update: sentUpdate(contact, campaignId, result.id, ts), kind: 'sent', resendId: result.id });
+      ctx.writer?.enqueue({ update: sentUpdate(contact), kind: 'sent', resendId: result.id });
     } else if (result.ambiguous) {
       this.deps.journal.record({
         ts,
@@ -543,9 +530,9 @@ export class CampaignService {
         email: masked,
         reason: result.error,
       });
+      // The row keeps Batch Flag = Processing, which the Review screen lists.
       setResult('needs_review', '', result.error);
       ctx.progress.needsReview++;
-      ctx.writer?.enqueue({ update: reviewUpdate(contact, campaignId, result.error), kind: 'review', resendId: '' });
     } else if (result.fatal) {
       this.deps.journal.record({
         ts,
@@ -558,7 +545,7 @@ export class CampaignService {
       });
       if (!ctx.abortReason) {
         ctx.abortReason = `Campaign stopped: ${result.error}`;
-        logger.error('campaign', 'Stopping campaign: Resend rejected the request for a reason that affects every email', {
+        logger.error('campaign', `Stopping campaign: ${prepared.mailer.providerLabel} rejected the request for a reason that affects every email`, {
           campaignId,
           reason: result.error,
         });
@@ -578,7 +565,7 @@ export class CampaignService {
       logger.error('campaign', 'Email failed', { row: contact.sheetRow, email: masked, reason: result.error });
       setResult('failed', '', result.error);
       ctx.progress.failed++;
-      ctx.writer?.enqueue({ update: failedUpdate(contact, campaignId, result.error), kind: 'failed', resendId: '' });
+      ctx.writer?.enqueue({ update: failedUpdate(contact), kind: 'failed', resendId: '' });
     }
 
     ctx.progress.processed++;
@@ -600,7 +587,7 @@ export class CampaignService {
     });
 
     if (item.kind === 'sent') {
-      logger.warn('campaign', `Resend accepted email but Google Sheet status update failed. Manual review required. ${EMAIL_SENT_SHEET_UPDATE_FAILED}`, {
+      logger.warn('campaign', `Email provider accepted email but Google Sheet status update failed. Manual review required. ${EMAIL_SENT_SHEET_UPDATE_FAILED}`, {
         campaignId,
         row,
         email: maskEmail(item.update.email),
@@ -673,10 +660,4 @@ export class CampaignService {
     const history = [entry, ...this.deps.repo.get('campaignHistory').filter((h) => h.id !== entry.id)];
     this.deps.repo.set('campaignHistory', history.slice(0, CAMPAIGN_HISTORY_LIMIT));
   }
-}
-
-/** Builds the From header. Quotes and angle brackets are stripped from the display name. */
-export function formatFrom(fromName: string, fromEmail: string): string {
-  const name = fromName.replace(/["<>\r\n]/g, '').trim();
-  return name ? `${name} <${fromEmail.trim()}>` : fromEmail.trim();
 }

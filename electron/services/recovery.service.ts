@@ -1,10 +1,10 @@
-import { SEND_STATUS, TAG } from '../../shared/constants';
+import { TAG } from '../../shared/constants';
 import type { RecoveryApplyInput } from '../../shared/schemas';
-import type { RecoveryApplyResult, RecoveryState, StaleContact } from '../../shared/types';
+import type { ContactRow, ManualReviewItem, RecoveryApplyResult, RecoveryState, StaleContact } from '../../shared/types';
 import type { SettingsRepository } from '../repositories/settings.repository';
 import type { AppLogger } from '../types/logger';
 import type { GoogleSheetsService, RowUpdate } from './google-sheets.service';
-import { lastSendOutcome, type CampaignJournal } from './journal.service';
+import { lastSendOutcome, type CampaignJournal, type JournalEntry } from './journal.service';
 import { maskEmail } from './log-format';
 import { findStaleProcessing } from './sheet-parser';
 
@@ -25,6 +25,30 @@ export interface RecoveryServiceDeps {
 export class RecoveryService {
   constructor(private readonly deps: RecoveryServiceDeps) {}
 
+  /**
+   * The sheet only holds the Batch Flag, so the campaign that reserved a Processing row is
+   * found in the local journals: the most recent campaign that reserved this row for this email.
+   */
+  private journalFor(row: Pick<ContactRow, 'sheetRow' | 'email'>): { campaignId: string; entry?: JournalEntry; review?: ManualReviewItem } {
+    const email = row.email.trim().toLowerCase();
+    const review = this.deps.repo
+      .get('manualReview')
+      .find((r) => r.sheetRow === row.sheetRow && r.email.trim().toLowerCase() === email);
+    const marker = this.deps.repo.get('activeCampaign');
+    const candidates = [marker?.campaignId, review?.campaignId, ...this.deps.repo.get('campaignHistory').map((h) => h.id)].filter(
+      (id): id is string => Boolean(id),
+    );
+    const masked = maskEmail(row.email);
+    for (const campaignId of new Set(candidates)) {
+      const entries = this.deps.journal.read(campaignId);
+      const reserved = entries.some((e) => e.event === 'reserved' && e.sheetRow === row.sheetRow && e.maskedEmail === masked);
+      if (reserved || campaignId === review?.campaignId) {
+        return { campaignId, entry: lastSendOutcome(entries, row.sheetRow), review };
+      }
+    }
+    return { campaignId: review?.campaignId ?? '', review };
+  }
+
   async scan(): Promise<RecoveryState> {
     const { repo } = this.deps;
     const marker = repo.get('activeCampaign');
@@ -41,19 +65,14 @@ export class RecoveryService {
     }
     try {
       const stale = await this.deps.createSheets().findStaleProcessingRows();
-      const journals = new Map<string, ReturnType<CampaignJournal['read']>>();
       state.staleContacts = stale.map((row): StaleContact => {
-        if (!journals.has(row.campaignId)) journals.set(row.campaignId, this.deps.journal.read(row.campaignId));
-        const entry = lastSendOutcome(journals.get(row.campaignId) ?? [], row.sheetRow);
-        const review = state.manualReview.find((r) => r.campaignId === row.campaignId && r.sheetRow === row.sheetRow);
+        const { campaignId, entry, review } = this.journalFor(row);
         return {
           sheetRow: row.sheetRow,
           email: row.email,
           firstName: row.firstName,
           tag: row.tag,
-          sendStatus: row.sendStatus,
-          campaignId: row.campaignId,
-          lastError: row.lastError,
+          campaignId,
           journalResendId: entry?.resendId ?? review?.resendId ?? '',
           journalOutcome: entry?.outcome ?? (review ? 'accepted' : 'none'),
         };
@@ -77,7 +96,6 @@ export class RecoveryService {
   async apply(input: RecoveryApplyInput): Promise<RecoveryApplyResult> {
     if (this.deps.isCampaignRunning()) throw new Error('Wait for the running campaign to finish before resolving rows.');
     const sheets = this.deps.createSheets();
-    const now = (this.deps.now ?? (() => new Date()))().toISOString();
     const current = await sheets.findStaleProcessingRows();
     const skipped: RecoveryApplyResult['skipped'] = [];
     const updates: RowUpdate[] = [];
@@ -90,40 +108,19 @@ export class RecoveryService {
         skipped.push({ sheetRow: requested.sheetRow, reason: 'Row is no longer in Processing or its email changed' });
         continue;
       }
-      const entry = lastSendOutcome(this.deps.journal.read(row.campaignId), row.sheetRow);
-      const review = this.deps.repo
-        .get('manualReview')
-        .find((r) => r.campaignId === row.campaignId && r.sheetRow === row.sheetRow);
+      const { entry, review } = this.journalFor(row);
       const acceptedId = entry?.outcome === 'accepted' ? (entry.resendId ?? '') : (review?.resendId ?? '');
 
       if (input.action === 'mark_new' && acceptedId) {
         skipped.push({
           sheetRow: row.sheetRow,
-          reason: `Resend already accepted this email (ID ${acceptedId}); marking it New would send it again. Mark it Sent instead.`,
+          reason: `The email provider already accepted this email (ID ${acceptedId}); marking it New would send it again. Mark it Sent instead.`,
         });
         continue;
       }
 
-      const base = { sheetRow: row.sheetRow, email: row.email, expectedState: 'stale' as const };
-      if (input.action === 'mark_new') {
-        updates.push({ ...base, fields: { tag: TAG.New, send_status: '', campaign_id: '', last_error: '' } });
-      } else if (input.action === 'mark_failed') {
-        updates.push({
-          ...base,
-          fields: { tag: TAG.Failed, send_status: SEND_STATUS.Failed, last_error: 'Marked Failed during manual review' },
-        });
-      } else {
-        updates.push({
-          ...base,
-          fields: {
-            tag: TAG.Sent,
-            send_status: SEND_STATUS.Sent,
-            sent_at: row.sentAt || entry?.ts || now,
-            resend_email_id: row.resendEmailId || acceptedId,
-            last_error: '',
-          },
-        });
-      }
+      const status = input.action === 'mark_new' ? TAG.New : input.action === 'mark_failed' ? TAG.Failed : TAG.Sent;
+      updates.push({ sheetRow: row.sheetRow, email: row.email, expectedState: 'processing', status });
     }
 
     const failures = await sheets.applyRowUpdates(updates);
@@ -140,10 +137,10 @@ export class RecoveryService {
     }
     // Rows resolved in the sheet no longer need their manual-review record.
     if (applied.length > 0) {
-      const resolved = new Set(applied.map((u) => u.sheetRow));
+      const resolved = new Set(applied.map((u) => `${u.sheetRow}:${u.email.trim().toLowerCase()}`));
       const remaining = this.deps.repo
         .get('manualReview')
-        .filter((r) => !(resolved.has(r.sheetRow) && current.some((c) => c.sheetRow === r.sheetRow && c.campaignId === r.campaignId)));
+        .filter((r) => !resolved.has(`${r.sheetRow}:${r.email.trim().toLowerCase()}`));
       this.deps.repo.set('manualReview', remaining);
     }
     return { updated: applied.length, skipped };

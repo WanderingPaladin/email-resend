@@ -4,7 +4,6 @@ import { Alert, Badge } from '@/components/ui/badge';
 const SKIP_LABELS: Record<SkippedContact['reason'], string> = {
   blank_email: 'Blank email',
   invalid_email: 'Invalid email',
-  unsubscribed: 'Unsubscribed',
   already_sent: 'Already sent',
   duplicate_in_campaign: 'Duplicate',
   email_already_sent_elsewhere: 'Sent in another row',

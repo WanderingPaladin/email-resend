@@ -20,6 +20,9 @@ export type IpcResult<T> = { ok: true; data: T } | { ok: false; error: string };
 export interface ConfigView {
   settings: Settings;
   hasResendApiKey: boolean;
+  hasElasticEmailApiKey: boolean;
+  hasMailjetApiKey: boolean;
+  hasMailjetSecretKey: boolean;
   hasGooglePrivateKey: boolean;
   /** False when the OS cannot encrypt secrets (e.g. Linux without a keyring). */
   encryptionAvailable: boolean;
@@ -35,20 +38,13 @@ export interface ContactRow {
   firstName: string;
   lastName: string;
   email: string;
-  company: string;
+  /** Batch Flag (or tag) value. */
   tag: string;
-  sendStatus: string;
-  campaignId: string;
-  sentAt: string;
-  resendEmailId: string;
-  lastError: string;
-  unsubscribed: string;
 }
 
 export type SkipReason =
   | 'blank_email'
   | 'invalid_email'
-  | 'unsubscribed'
   | 'already_sent'
   | 'duplicate_in_campaign'
   | 'email_already_sent_elsewhere';
@@ -66,7 +62,6 @@ export interface ContactPreview {
   firstName: string;
   lastName: string;
   email: string;
-  company: string;
   tag: string;
 }
 
@@ -76,7 +71,6 @@ export interface PreviewResult {
   selected: ContactPreview[];
   skipped: SkippedContact[];
   batchSize: number;
-  missingTrackingColumns: string[];
   staleProcessingCount: number;
 }
 
@@ -91,10 +85,11 @@ export interface GoogleTestResult {
   rowCount: number;
   newCount: number;
   headers: string[];
-  missingTrackingColumns: string[];
+  /** Which sheet columns are used, e.g. { name: 'Name', email: 'Email', status: 'Batch Flag' }. */
+  columns: { name: string; email: string; status: string };
 }
 
-export interface ResendValidationResult {
+export interface MailerValidationResult {
   status: 'valid' | 'restricted';
   message: string;
   verifiedDomains: string[];
@@ -102,6 +97,7 @@ export interface ResendValidationResult {
 }
 
 export interface TestEmailResult {
+  /** Message ID returned by the email provider. */
   resendId: string;
 }
 
@@ -192,10 +188,9 @@ export interface StaleContact {
   email: string;
   firstName: string;
   tag: string;
-  sendStatus: string;
+  /** Campaign that reserved the row, found in the local journal ('' if unknown). */
   campaignId: string;
-  lastError: string;
-  /** Resend ID recorded in the local journal, if Resend accepted this email. */
+  /** Message ID recorded in the local journal, if the provider accepted this email. */
   journalResendId: string;
   journalOutcome: 'accepted' | 'rejected' | 'unknown' | 'none';
 }
@@ -245,7 +240,9 @@ export interface LogEntry {
 export interface AppStatus {
   version: string;
   googleConfigured: boolean;
-  resendConfigured: boolean;
+  /** The selected email provider has its credentials stored. */
+  mailerConfigured: boolean;
+  emailProviderLabel: string;
   campaignRunning: boolean;
   lastCampaign: CampaignHistoryEntry | null;
   recentCampaigns: CampaignHistoryEntry[];

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { normalizeResendError, ResendService } from '../electron/services/resend.service';
 import { FakeResendClient, MemoryLogger, noSleep } from './helpers';
 
-const email = { from: 'Julio <julio@example.com>', to: 'maria@example.com', subject: 'Hi', html: '<p>Hi</p>', text: 'Hi' };
+const email = { fromName: 'Julio', fromEmail: 'julio@example.com', to: 'maria@example.com', subject: 'Hi', html: '<p>Hi</p>', text: 'Hi' };
 
 function service(client: FakeResendClient) {
   return new ResendService(client, new MemoryLogger(), { sendsPerSecond: 10, sleepFn: noSleep, now: () => 0 });

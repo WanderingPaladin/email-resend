@@ -24,7 +24,7 @@ const PEM_PATTERN = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*
 const RESEND_KEY_PATTERN = /\bre_[A-Za-z0-9_]{8,}\b/g;
 const BEARER_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 
-const SECRET_KEY_NAMES = /^(resend_?api_?key|api_?key|private_?key|google_?private_?key|password|secret|token|authorization|access_?token|refresh_?token|client_?secret|credentials?)$/i;
+const SECRET_KEY_NAMES = /^((resend|elastic_?email|mailjet)_?api_?key|(mailjet_?)?secret_?key|api_?key|private_?key|google_?private_?key|password|secret|token|authorization|access_?token|refresh_?token|client_?secret|credentials?)$/i;
 
 /** Removes secrets (and optionally masks emails) from free text. */
 export function redactText(text: string, options: { maskEmails?: boolean } = {}): string {

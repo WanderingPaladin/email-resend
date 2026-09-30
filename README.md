@@ -1,18 +1,20 @@
 # Email Sender
 
-A desktop utility (Electron + React + TypeScript) that reads contacts tagged **New** from the
-`Emails` worksheet of a Google Sheet, sends each one a personalized email through
-[Resend](https://resend.com), and marks the row **Sent** or **Failed**. It is built to avoid
+A desktop utility (Electron + React + TypeScript) that reads contacts whose **Batch Flag** is **New**
+from the `Emails` worksheet of a Google Sheet, sends each one a personalized email through
+[Resend](https://resend.com), [Elastic Email](https://elasticemail.com) or [Mailjet](https://www.mailjet.com),
+and marks the row **Sent** or **Failed**. It is built to avoid
 duplicate sends, to survive crashes and partial failures, and to be easy to debug through logs.
 
 > Only email contacts you are authorized to email.
 
 ## Features
 
-- Google Sheets and Resend configuration with credentials encrypted by the operating system (`safeStorage`)
-- Contact preview (up to 100 per campaign), template variables, live email preview
+- Google Sheets and email provider (Resend, Elastic Email or Mailjet) configuration, with credentials encrypted by the operating system (`safeStorage`)
+- Contact preview (up to 100 per campaign), template variables
+- Email editor with Visual (formatted), HTML code and Plain text modes, and a live rendered preview
 - Test email, dry run, confirmation step, live progress, cancel, results table
-- Controlled concurrency (`p-limit`) and a send-rate throttle for Resend's rate limit
+- Controlled concurrency (`p-limit`) and a send-rate throttle for the provider's rate limit
 - Duplicate-send protection, crash recovery and a Review screen for ambiguous rows
 - Persistent logs with masking and secret redaction, live log viewer
 - Local campaign history (last 50)
@@ -24,7 +26,7 @@ See [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) for the process model, security
 
 - Node.js 22 or newer and npm
 - A Google Cloud account (for a service account with Google Sheets API access)
-- A Resend account with a verified sending domain
+- An account with Resend, Elastic Email or Mailjet, with a verified sending domain or sender
 
 ## Install
 
@@ -70,7 +72,7 @@ configure a certificate as described in the electron-builder docs (`CSC_LINK`, `
 npm test
 ```
 
-Unit and integration tests use an in-memory Google Sheet and a fake Resend client. No real API
+Unit and integration tests use an in-memory Google Sheet and a fake Resend client and a fake fetch for Elastic Email and Mailjet. No real API
 calls are made.
 
 ## Google Cloud setup
@@ -92,46 +94,42 @@ calls are made.
 Then fill in **Spreadsheet ID** (the long ID in the sheet URL, or paste the whole URL) and
 **Worksheet Name** (default `Emails`), click **Save** and **Test Google Sheets**.
 
-## Resend setup
+## Email provider setup
 
-1. Create a [Resend](https://resend.com) account.
-2. Add and verify your sending domain (Domains → Add Domain, then add the DNS records it shows).
-3. Generate an API key (API Keys → Create API Key). "Sending access" is enough; "Full access" also lets the app check your verified domains.
-4. Open Email Sender → **Settings**.
-5. Paste the API key into **API Key**.
-6. Set **From Name** and **From Email** (an address on your verified domain) and click **Save**.
-   **Validate Resend Configuration** checks the key without sending anything.
-7. On the **Campaign** page, use **Send Test Email** to send yourself a real message.
+Open Email Sender → **Settings** → **Email Provider**, choose **Send With**, enter the keys, set
+**From Name** and **From Email**, and click **Save**. Keys are stored encrypted. **Validate** checks
+the keys without sending anything; **Send Test Email** on the Campaign page sends a real message.
+
+| Provider | What to enter | Where to get it |
+| --- | --- | --- |
+| Resend | API key (`re_…`) | resend.com → Domains (verify your domain), then API Keys → Create API Key |
+| Elastic Email | API key | elasticemail.com → Settings → Manage API Keys → Create (allow sending), and verify your domain under Domains |
+| Mailjet | API key **and** secret key | mailjet.com → Account settings → API Key Management; the From address (or its domain) must be an active sender under Senders & Domains |
+
+The From Email must be on a domain (or sender) verified with the selected provider.
+Only one provider is used at a time; switching keeps the other providers' keys stored.
 
 ## Google Sheet format
 
-Row 1 must contain headers. Columns are matched by name (case-insensitive, trimmed), in any order.
+Row 1 must contain headers. The app reads only three things, matched by header name
+(case-insensitive; `_`, `-` and spaces are treated alike), in any order:
 
-| Column | Required | Written by the app | Notes |
-| --- | --- | --- | --- |
-| `first_name` | yes | | Empty values use the fallback (default `there`) |
-| `email` | yes | | Invalid or blank emails are skipped |
-| `tag` | yes | yes | `New` → `Processing` → `Sent` or `Failed` |
-| `last_name`, `company` | no | | Available as template variables |
-| `unsubscribed` | no | | `true`, `yes`, `1` or `unsubscribed` means never email |
-| `send_status` | tracking | yes | `processing`, `sent`, `failed`, `review` |
-| `campaign_id` | tracking | yes | UUID of the campaign that processed the row |
-| `sent_at` | tracking | yes | ISO timestamp |
-| `resend_email_id` | tracking | yes | ID returned by Resend |
-| `last_error` | tracking | yes | Sanitized error message |
+| What | Header | Notes |
+| --- | --- | --- |
+| Name | `Name` (full name), or `first_name` / `last_name` | With `Name`, the first word becomes `{{first_name}}` and the rest `{{last_name}}` ("Lopez, Maria" is also understood). Empty names use the fallback (default `there`) |
+| Email | `Email` | Invalid or blank emails are skipped |
+| Status | `Batch Flag` (or `tag`) | The app sends to `New` rows and writes `Processing`, then `Sent` or `Failed` |
 
-Alternative layout: instead of `first_name` you can have a `Name` column (full name). The first
-word becomes `{{first_name}}` and the rest `{{last_name}}` ("Lopez, Maria" is also understood).
-Instead of `tag` you can use a `Batch Flag` column; the app reads `New` from it and writes
-`Processing`, `Sent` or `Failed` back to it. Other columns (Location, Country, …) are ignored and never changed.
-
-If tracking columns are missing, the app offers to add them to the right of your existing headers
-(from Settings → Test Google Sheets, or in the send confirmation). Nothing else in the sheet is moved.
+Every other column (Location, Country, notes, …) is ignored and never changed. The app never adds
+columns: the Batch Flag cell is the only cell it writes.
 
 ## Workflow
 
-1. **Settings**: configure Google Sheets and Resend, then test both connections.
-2. **Campaign**: write the subject and body. Variables: `{{first_name}}`, `{{last_name}}`, `{{email}}`, `{{company}}`.
+1. **Settings**: configure Google Sheets and the email provider, then test both connections.
+2. **Campaign**: write the subject and body. Variables: `{{first_name}}`, `{{last_name}}`, `{{email}}`.
+   Use **Visual** to format the email like a document (bold, headings, lists, links, colors),
+   **HTML code** to paste or edit HTML directly, or **Plain text**. The preview shows the email
+   exactly as it will be sent, with the first previewed contact's details.
    Unknown variables (e.g. a typo like `{{frist_name}}`) block sending.
 3. **Preview Contacts** to see exactly which rows will be emailed, and why others are skipped.
 4. Run a **Dry Run** (on by default): every email is rendered and logged as
@@ -144,17 +142,17 @@ If tracking columns are missing, the app offers to add them to the right of your
 
 ## If something goes wrong
 
-- **A contact fails**: its row becomes `Failed` with `last_error`; the campaign continues.
+- **A contact fails**: its row becomes `Failed`; the reason is in the results table and Logs. The campaign continues.
 - **Invalid API key, quota exhausted or unverified sender**: the campaign stops early and
   unstarted contacts go back to `New`.
-- **Network error while sending**: Resend may or may not have delivered it. The row stays in
-  `Processing` with `send_status = review` and is never resent automatically.
+- **Network error while sending**: the provider may or may not have delivered it. The row stays in
+  `Processing` and is never resent automatically.
 - **App closed or crashed mid-campaign**: rows left in `Processing` are listed on the **Review**
   screen at the next launch. Choose **Mark as New**, **Mark as Failed** or **Mark as Sent** for each.
-  Nothing on that screen sends email, and **Mark as New** is refused for rows the app knows Resend accepted.
-- **Resend accepted an email but the sheet update failed**: logged as a warning
+  Nothing on that screen sends email, and **Mark as New** is refused for rows the app knows the provider accepted.
+- **The provider accepted an email but the sheet update failed**: logged as a warning
   (`EMAIL_SENT_SHEET_UPDATE_FAILED`, find it under Logs → Warning) and listed on the Review screen
-  with the Resend ID. Mark the row as Sent there.
+  with the message ID. Mark the row as Sent there. That address is not emailed again automatically.
 
 ## Where data is stored
 
@@ -168,7 +166,7 @@ All paths are inside Electron's user-data folder (`%APPDATA%\Email Sender` on Wi
 | `logs/campaign.log` | Campaign entries only |
 | `journal/<campaign-id>.jsonl` | Per-contact send outcomes used for crash recovery (emails masked) |
 
-Credentials are encrypted with the OS keychain (Windows DPAPI, macOS Keychain, Linux
+Credentials (Google private key, and the Resend, Elastic Email and Mailjet keys) are encrypted with the OS keychain (Windows DPAPI, macOS Keychain, Linux
 libsecret/KWallet). On Linux without a keyring (gnome-keyring or KWallet) the app refuses to save
 them rather than storing them with Electron's weak fallback.
 The app never writes API keys or private keys to logs; emails in logs are masked.
@@ -190,8 +188,9 @@ electron/
   preload.ts              contextBridge API (window.emailApp)
   app-context.ts          creates and wires the services
   ipc/                    one file per area; every handler validates input with Zod
-  services/               config, google-sheets, sheet-parser, resend, campaign, recovery,
-                          journal, logger, log-format, retry, template (re-export)
+  services/               config, google-sheets, sheet-parser, mailer (shared send/retry),
+                          resend, elastic-email, mailjet, campaign, recovery, journal,
+                          logger, log-format, retry, network, template (re-export)
   repositories/           electron-store settings repository
   types/                  main-process-only types
 src/

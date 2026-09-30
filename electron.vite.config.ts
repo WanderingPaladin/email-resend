@@ -14,7 +14,7 @@ import type { Plugin } from 'vite';
 
 // Must match PROD_CSP in electron/main.ts.
 const PROD_CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 function productionCsp(): Plugin {
   return {

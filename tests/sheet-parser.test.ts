@@ -5,10 +5,8 @@ import {
   clampBatchSize,
   columnToLetter,
   findStaleProcessing,
-  isUnsubscribed,
   isValidEmail,
   missingRequiredColumns,
-  missingTrackingColumns,
   normalizeHeader,
   parseContacts,
   quoteSheetName,
@@ -27,12 +25,21 @@ function rows(headers: string[], records: Record<string, string>[]): string[][] 
 }
 
 describe('header parsing', () => {
-  it('normalizes headers with trim + lowercase', () => {
-    expect(normalizeHeader('  First_Name ')).toBe('first_name');
+  it('normalizes headers: trim, lowercase, and _ or - treated as a space', () => {
+    expect(normalizeHeader('  First_Name ')).toBe('first name');
+    expect(normalizeHeader('Batch-Flag')).toBe('batch flag');
     const map = buildHeaderMap([' EMAIL', 'Tag ', 'First_Name']);
     expect(map.get('email')).toBe(0);
     expect(map.get('tag')).toBe(1);
-    expect(map.get('first_name')).toBe(2);
+    expect(map.get('first name')).toBe(2);
+  });
+
+  it('reads only name, email and status, whatever else the sheet has', () => {
+    const { contacts } = parseContacts([
+      ['Company', 'First Name', 'Last Name', 'E-mail', 'Unsubscribed', 'Batch Flag'],
+      ['Acme', 'Carlos', 'Lopez', 'carlos@example.com', 'yes', 'New'],
+    ]);
+    expect(contacts[0]).toEqual({ sheetRow: 2, firstName: 'Carlos', lastName: 'Lopez', email: 'carlos@example.com', tag: 'New' });
   });
 
   it('reads columns by name regardless of order', () => {
@@ -41,13 +48,12 @@ describe('header parsing', () => {
     for (const parsed of [a, b]) {
       expect(parsed.contacts[0]).toMatchObject({ firstName: 'Carlos', lastName: 'Lopez', email: 'carlos@example.com', tag: 'New' });
     }
-    expect(b.contacts[0]?.company).toBe('Acme');
   });
 
-  it('reports missing required and tracking columns', () => {
-    const map = buildHeaderMap(['Email', 'TAG']);
-    expect(missingRequiredColumns(map)).toEqual(['first_name or Name']);
-    expect(missingTrackingColumns(map)).toEqual(['send_status', 'campaign_id', 'sent_at', 'resend_email_id', 'last_error']);
+  it('reports missing required columns', () => {
+    expect(missingRequiredColumns(buildHeaderMap(['Email', 'TAG']))).toEqual(['Name (or first_name)']);
+    expect(missingRequiredColumns(buildHeaderMap(['Name']))).toEqual(['Email', 'Batch Flag']);
+    expect(missingRequiredColumns(buildHeaderMap(['Name', 'Email', 'Batch Flag']))).toEqual([]);
   });
 
   it('tolerates short rows (Sheets omits trailing empty cells)', () => {
@@ -77,7 +83,7 @@ describe('row number preservation', () => {
 });
 
 describe('contact selection', () => {
-  const headers = ['first_name', 'email', 'tag', 'unsubscribed', 'send_status', 'resend_email_id'];
+  const headers = ['first_name', 'email', 'tag'];
 
   it('selects only tag = New, case- and whitespace-insensitive', () => {
     const { contacts } = parseContacts(
@@ -112,26 +118,15 @@ describe('contact selection', () => {
     expect(result.skipped).toEqual([expect.objectContaining({ sheetRow: 3, reason: 'duplicate_in_campaign' })]);
   });
 
-  it('skips unsubscribed contacts for every supported value', () => {
-    for (const value of ['true', 'YES', '1', 'Unsubscribed', ' yes ']) expect(isUnsubscribed(value)).toBe(true);
-    for (const value of ['', 'no', 'false', '0']) expect(isUnsubscribed(value)).toBe(false);
-    const { contacts } = parseContacts(rows(headers, [contact('u@example.com', { unsubscribed: 'yes' }), contact('ok@example.com')]));
-    const result = selectContacts(contacts, 100);
-    expect(result.selected.map((c) => c.email)).toEqual(['ok@example.com']);
-    expect(result.skipped[0]?.reason).toBe('unsubscribed');
-  });
-
-  it('skips New rows that already carry a resend_email_id or send_status = sent', () => {
-    const { contacts } = parseContacts(
-      rows(headers, [contact('a@example.com', { resend_email_id: 'abc' }), contact('b@example.com', { send_status: 'Sent' }), contact('c@example.com')]),
-    );
-    const result = selectContacts(contacts, 100);
+  it('skips emails awaiting manual review after an accepted send', () => {
+    const { contacts } = parseContacts(rows(headers, [contact('a@example.com'), contact('c@example.com')]));
+    const result = selectContacts(contacts, 100, new Set(['a@example.com']));
     expect(result.selected.map((c) => c.email)).toEqual(['c@example.com']);
-    expect(result.skipped.map((s) => s.reason)).toEqual(['already_sent', 'already_sent']);
+    expect(result.skipped.map((s) => s.reason)).toEqual(['already_sent']);
   });
 
   it('skips an email that was already sent from another row', () => {
-    const { contacts } = parseContacts(rows(headers, [contact('same@example.com', { tag: 'Sent', resend_email_id: 'x' }), contact('SAME@example.com')]));
+    const { contacts } = parseContacts(rows(headers, [contact('same@example.com', { tag: 'Sent' }), contact('SAME@example.com')]));
     const result = selectContacts(contacts, 100);
     expect(result.selected).toHaveLength(0);
     expect(result.skipped[0]?.reason).toBe('email_already_sent_elsewhere');
@@ -139,19 +134,16 @@ describe('contact selection', () => {
 });
 
 describe('stale Processing detection', () => {
-  it('finds rows left in Processing or review state', () => {
+  it('finds rows left in Processing', () => {
     const { contacts } = parseContacts(
-      rows(headers(), [
-        contact('a@example.com', { tag: 'Processing', send_status: 'processing' }),
-        contact('b@example.com', { tag: 'Sent', send_status: 'sent' }),
-        contact('c@example.com', { tag: 'Processing', send_status: 'review' }),
+      rows(['first_name', 'email', 'tag'], [
+        contact('a@example.com', { tag: 'Processing' }),
+        contact('b@example.com', { tag: 'Sent' }),
+        contact('c@example.com', { tag: ' processing ' }),
         contact('d@example.com'),
       ]),
     );
     expect(findStaleProcessing(contacts).map((c) => c.sheetRow)).toEqual([2, 4]);
-    function headers() {
-      return ['first_name', 'email', 'tag', 'send_status'];
-    }
   });
 });
 

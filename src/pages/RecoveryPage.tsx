@@ -21,9 +21,9 @@ const ACTION_TEXT: Record<Action, { label: string; explain: string }> = {
 function outcomeBadge(c: StaleContact) {
   switch (c.journalOutcome) {
     case 'accepted':
-      return <Badge tone="success">Resend accepted</Badge>;
+      return <Badge tone="success">Provider accepted</Badge>;
     case 'rejected':
-      return <Badge tone="error">Resend rejected</Badge>;
+      return <Badge tone="error">Provider rejected</Badge>;
     case 'unknown':
       return <Badge tone="warning">Unknown</Badge>;
     default:
@@ -116,8 +116,7 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
                   <th className="px-3 py-2 font-medium">Email</th>
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Local record</th>
-                  <th className="px-3 py-2 font-medium">Resend ID</th>
-                  <th className="px-3 py-2 font-medium">Last error</th>
+                  <th className="px-3 py-2 font-medium">Message ID</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -128,12 +127,9 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
                     </td>
                     <td className="px-3 py-1.5 tabular-nums">{c.sheetRow}</td>
                     <td className="px-3 py-1.5">{c.email}</td>
-                    <td className="px-3 py-1.5">
-                      {c.tag} / {c.sendStatus || '—'}
-                    </td>
+                    <td className="px-3 py-1.5">{c.tag}</td>
                     <td className="px-3 py-1.5">{outcomeBadge(c)}</td>
                     <td className="px-3 py-1.5 font-mono">{c.journalResendId}</td>
-                    <td className="max-w-xs px-3 py-1.5 text-slate-600">{c.lastError}</td>
                   </tr>
                 ))}
               </tbody>
@@ -146,7 +142,7 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
         <Card>
           <CardHeader
             title="Sent, but the sheet was not updated"
-            description="Resend accepted these emails but the status write to Google Sheets failed (EMAIL_SENT_SHEET_UPDATE_FAILED). Mark the matching rows above as Sent, then dismiss."
+            description="The email provider accepted these emails but the status write to Google Sheets failed (EMAIL_SENT_SHEET_UPDATE_FAILED). Mark the matching rows above as Sent, then dismiss."
           />
           <CardBody className="p-0">
             <table className="w-full text-xs">
@@ -155,7 +151,7 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
                   <th className="px-3 py-2 font-medium">Time</th>
                   <th className="px-3 py-2 font-medium">Row</th>
                   <th className="px-3 py-2 font-medium">Email</th>
-                  <th className="px-3 py-2 font-medium">Resend ID</th>
+                  <th className="px-3 py-2 font-medium">Message ID</th>
                   <th className="px-3 py-2 font-medium">Campaign</th>
                   <th className="px-3 py-2" />
                 </tr>
@@ -200,7 +196,7 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
           <div className="space-y-2">
             <p>{ACTION_TEXT[pending].explain}</p>
             {pending === 'mark_new' && chosen.some((c) => c.journalOutcome === 'accepted') && (
-              <Alert tone="error">Some selected rows were accepted by Resend. Those rows will be refused to prevent a duplicate send.</Alert>
+              <Alert tone="error">Some selected rows were accepted by the email provider. Those rows will be refused to prevent a duplicate send.</Alert>
             )}
           </div>
         )}

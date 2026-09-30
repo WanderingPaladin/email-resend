@@ -5,6 +5,9 @@ import type { CampaignHistoryEntry, ManualReviewItem } from '../../shared/types'
 /** Encrypted secrets, stored as base64 of safeStorage ciphertext. Never plain text. */
 export interface EncryptedSecrets {
   resendApiKey?: string;
+  elasticEmailApiKey?: string;
+  mailjetApiKey?: string;
+  mailjetSecretKey?: string;
   googlePrivateKey?: string;
 }
 

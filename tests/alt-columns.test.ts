@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { settingsSchema } from '../shared/schemas';
 import { CampaignService } from '../electron/services/campaign.service';
 import { createMemoryJournal } from '../electron/services/journal.service';
-import { buildHeaderMap, missingRequiredColumns, parseContacts, selectContacts, splitFullName } from '../electron/services/sheet-parser';
+import { buildHeaderMap, missingRequiredColumns, parseContacts, resolveColumns, selectContacts, splitFullName } from '../electron/services/sheet-parser';
 import { createHarness } from './helpers';
 
 // Xing's sheet layout.
@@ -29,31 +29,29 @@ describe('Name / Batch Flag layout', () => {
     expect(splitFullName('')).toEqual({ firstName: '', lastName: '' });
   });
 
-  it('treats Batch Flag as the tag column and Name as the first-name source', () => {
+  it('treats Batch Flag as the status column and Name as the first-name source', () => {
     const headers = buildHeaderMap(HEADERS);
-    expect(headers.get('tag')).toBe(9);
+    expect(resolveColumns(headers)).toMatchObject({ status: 9, email: 1, fullName: 0 });
     expect(missingRequiredColumns(headers)).toEqual([]);
     const { contacts } = parseContacts([HEADERS, row('Maria Lopez', 'maria@example.com', 'New'), row('Old One', 'old@example.com', 'Sent')]);
     expect(contacts[0]).toMatchObject({ sheetRow: 2, firstName: 'Maria', lastName: 'Lopez', email: 'maria@example.com', tag: 'New' });
     expect(selectContacts(contacts, 100).selected.map((c) => c.email)).toEqual(['maria@example.com']);
   });
 
-  it('prefers real first_name/tag columns when both layouts are present', () => {
+  it('prefers first_name over Name, and Batch Flag over tag, when both are present', () => {
     const { contacts } = parseContacts([
       ['Name', 'first_name', 'email', 'tag', 'Batch Flag'],
       ['Maria Lopez', 'Mari', 'maria@example.com', 'New', 'Sent'],
     ]);
-    expect(contacts[0]).toMatchObject({ firstName: 'Mari', tag: 'New' });
+    expect(contacts[0]).toMatchObject({ firstName: 'Mari', tag: 'Sent' });
   });
 
   it('reports the accepted alternatives when columns are missing', () => {
-    expect(missingRequiredColumns(buildHeaderMap(['Email']))).toEqual(['first_name or Name', 'tag or Batch Flag']);
+    expect(missingRequiredColumns(buildHeaderMap(['Email']))).toEqual(['Name (or first_name)', 'Batch Flag']);
   });
 
   it('runs a campaign that personalizes from Name and writes status to Batch Flag', async () => {
     const h = createHarness([[...HEADERS], row('Maria Lopez', 'maria@example.com', 'New'), row('', 'noname@example.com', 'New')]);
-    // The grid is exactly as wide as the headers (10 columns), like a copied sheet.
-    h.gateway.columnCount = 10;
     const summaries: unknown[] = [];
     const service = new CampaignService({
       logger: h.logger,
@@ -74,18 +72,14 @@ describe('Name / Batch Flag layout', () => {
       batchSize: 100,
       concurrency: 2,
       dryRun: false,
-      initializeTrackingColumns: true,
     });
     await service.whenIdle();
 
     expect(h.client.calls.find((c) => c.to === 'maria@example.com')?.text.startsWith('Hi Maria,')).toBe(true);
     expect(h.client.calls.find((c) => c.to === 'noname@example.com')?.subject).toBe('Hi there');
-    // Status goes to Batch Flag; tracking columns are appended after it; other columns untouched.
-    expect(h.gateway.rows[0]?.slice(0, 10)).toEqual(HEADERS);
-    expect(h.gateway.rows[0]?.slice(10)).toEqual(['send_status', 'campaign_id', 'sent_at', 'resend_email_id', 'last_error']);
-    expect(h.gateway.rowObject(2)).toMatchObject({ 'batch flag': 'Sent', send_status: 'sent', name: 'Maria Lopez', country: 'Peru' });
-    expect(h.gateway.rowObject(2)['tag']).toBeUndefined();
-    expect(h.gateway.columnCount).toBe(15);
-    expect(h.gateway.gridResizes).toBe(1);
+    // Status goes to Batch Flag; no columns are added and every other column is untouched.
+    expect(h.gateway.rows[0]).toEqual(HEADERS);
+    expect(h.gateway.rows[1]).toEqual(row('Maria Lopez', 'maria@example.com', 'Sent'));
+    expect(h.gateway.rows[2]).toEqual(row('', 'noname@example.com', 'Sent'));
   });
 });

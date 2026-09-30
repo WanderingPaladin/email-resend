@@ -15,16 +15,12 @@ export function registerGoogleIpc(ctx: AppContext, deps: IpcDeps): void {
     }
   });
 
-  handle(deps, IPC.googleInitColumns, null, async () => {
-    if (ctx.campaign.isCampaignRunning()) throw new Error('A campaign is already running.');
-    return { added: await ctx.createSheets().initializeTrackingColumns() };
-  });
-
   handle(deps, IPC.contactsPreview, previewInputSchema, ({ batchSize }) => ctx.campaign.previewContacts(batchSize));
 
-  handle(deps, IPC.resendValidate, null, async () => {
-    const result = await ctx.createMailer().validateConfiguration(ctx.config.getSettings().fromEmail);
-    ctx.logger.info('resend', 'Resend configuration validated', { status: result.status });
+  handle(deps, IPC.mailerValidate, null, async () => {
+    const mailer = ctx.createMailer();
+    const result = await mailer.validateConfiguration(ctx.config.getSettings().fromEmail);
+    ctx.logger.info('resend', `${mailer.providerLabel} configuration validated`, { status: result.status });
     return result;
   });
 }

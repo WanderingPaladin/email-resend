@@ -51,7 +51,7 @@ export function CampaignResults({
               <th className="px-2 py-1.5 font-medium">Email</th>
               <th className="px-2 py-1.5 font-medium">Sheet Row</th>
               <th className="px-2 py-1.5 font-medium">Status</th>
-              <th className="px-2 py-1.5 font-medium">Resend ID</th>
+              <th className="px-2 py-1.5 font-medium">Message ID</th>
               <th className="px-2 py-1.5 font-medium">Error</th>
             </tr>
           </thead>

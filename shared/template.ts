@@ -61,10 +61,17 @@ export function textToHtml(text: string): string {
     .join('\n');
 }
 
-/** Very small HTML → text fallback for the plain-text part of HTML emails. */
+/** Small HTML → text converter for the plain-text part of HTML emails. */
 export function htmlToText(html: string): string {
   return html
-    .replace(/<(br|\/p|\/div|\/h[1-6]|\/li)\s*\/?>/gi, '\n')
+    .replace(/<(head|style|script|title)\b[^>]*>[\s\S]*?<\/\1\s*>/gi, '')
+    .replace(/<!--[\s\S]*?-->/g, '')
+    .replace(/<a\b[^>]*\bhref\s*=\s*(["'])(.*?)\1[^>]*>([\s\S]*?)<\/a\s*>/gi, (_m, _q, href: string, inner: string) => {
+      const label = inner.replace(/<[^>]+>/g, '').trim();
+      return label && label !== href && !href.startsWith('mailto:') ? `${label} (${href})` : label || href;
+    })
+    .replace(/<li\b[^>]*>/gi, '\n- ')
+    .replace(/<(br|\/p|\/div|\/h[1-6]|\/tr|\/ul|\/ol)\s*\/?>/gi, '\n')
     .replace(/<[^>]+>/g, '')
     .replace(/&nbsp;/g, ' ')
     .replace(/&lt;/g, '<')
@@ -72,15 +79,20 @@ export function htmlToText(html: string): string {
     .replace(/&quot;/g, '"')
     .replace(/&#39;/g, "'")
     .replace(/&amp;/g, '&')
+    .replace(/[ \t]+\n/g, '\n')
     .replace(/\n{3,}/g, '\n\n')
     .trim();
+}
+
+/** True when the HTML is a complete document (has <html> or <body>) rather than a fragment. */
+export function isFullHtmlDocument(html: string): boolean {
+  return /<(html|body)[\s>]/i.test(html);
 }
 
 export interface ContactLike {
   firstName: string;
   lastName: string;
   email: string;
-  company: string;
 }
 
 /** Builds template variables for a contact, applying the first-name fallback. */
@@ -90,7 +102,6 @@ export function buildVariables(contact: ContactLike, firstNameFallback: string):
     first_name: firstName || firstNameFallback,
     last_name: contact.lastName.trim(),
     email: contact.email.trim(),
-    company: contact.company.trim(),
   };
 }
 

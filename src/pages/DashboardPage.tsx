@@ -52,9 +52,14 @@ export function DashboardPage({
           ? { label: 'Google Sheets', value: 'Error', tone: 'error', detail: googleError }
           : { label: 'Google Sheets', value: checking ? 'Checking…' : 'Configured', tone: 'neutral' }
       : { label: 'Google Sheets', value: 'Not Connected', tone: 'warning', detail: 'Configure it in Settings.' },
-    status?.resendConfigured
-      ? { label: 'Resend', value: 'Configured', tone: 'success', detail: config?.settings.fromEmail || undefined }
-      : { label: 'Resend', value: 'Not Configured', tone: 'warning', detail: 'Add your API key in Settings.' },
+    status?.mailerConfigured
+      ? { label: status.emailProviderLabel, value: 'Configured', tone: 'success', detail: config?.settings.fromEmail || undefined }
+      : {
+          label: status?.emailProviderLabel || 'Email Provider',
+          value: 'Not Configured',
+          tone: 'warning',
+          detail: 'Add your API key in Settings.',
+        },
     {
       label: 'Application Status',
       value: campaignRunning ? 'Campaign running' : status?.manualReviewCount || status?.interruptedCampaignId ? 'Needs review' : 'Ready',

@@ -6,10 +6,11 @@ import {
   MIN_BATCH_SIZE,
   MIN_CONCURRENCY,
   MIN_SENDS_PER_SECOND,
+  EMAIL_PROVIDER_LABELS,
 } from '@shared/constants';
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { GoogleSheetSettings } from '@/components/GoogleSheetSettings';
-import { ResendSettings } from '@/components/ResendSettings';
+import { EmailProviderSettings } from '@/components/EmailProviderSettings';
 import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -21,6 +22,15 @@ export function SettingsPage({ configHook, onSaved }: { configHook: ConfigHook; 
   const { config } = configHook;
   const googleReady = Boolean(
     config?.settings.spreadsheetId && config.settings.serviceAccountEmail && config.hasGooglePrivateKey,
+  );
+  const provider = config?.settings.emailProvider ?? 'resend';
+  const mailerReady = Boolean(
+    config &&
+      (provider === 'mailjet'
+        ? config.hasMailjetApiKey && config.hasMailjetSecretKey
+        : provider === 'elasticemail'
+          ? config.hasElasticEmailApiKey
+          : config.hasResendApiKey),
   );
   return (
     <>
@@ -41,9 +51,9 @@ export function SettingsPage({ configHook, onSaved }: { configHook: ConfigHook; 
                 tone: googleReady ? 'success' : 'warning',
               },
               {
-                label: 'Resend',
-                value: config?.hasResendApiKey ? 'Configured' : 'Not configured',
-                tone: config?.hasResendApiKey ? 'success' : 'warning',
+                label: EMAIL_PROVIDER_LABELS[provider],
+                value: mailerReady ? 'Configured' : 'Not configured',
+                tone: mailerReady ? 'success' : 'warning',
               },
               {
                 label: 'Spreadsheet',
@@ -55,7 +65,7 @@ export function SettingsPage({ configHook, onSaved }: { configHook: ConfigHook; 
         </CardBody>
       </Card>
       <GoogleSheetSettings configHook={configHook} onSaved={onSaved} />
-      <ResendSettings configHook={configHook} onSaved={onSaved} />
+      <EmailProviderSettings configHook={configHook} onSaved={onSaved} />
       <CampaignDefaults configHook={configHook} />
     </>
   );
@@ -109,7 +119,7 @@ function CampaignDefaults({ configHook }: { configHook: ConfigHook }) {
           <Field label="Concurrency" hint={`${MIN_CONCURRENCY}–${MAX_CONCURRENCY} parallel sends`}>
             <Input type="number" min={MIN_CONCURRENCY} max={MAX_CONCURRENCY} value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />
           </Field>
-          <Field label="Sends per Second" hint="Stay within your Resend rate limit">
+          <Field label="Sends per Second" hint="Stay within your provider's rate limit">
             <Input
               type="number"
               min={MIN_SENDS_PER_SECOND}
@@ -118,7 +128,7 @@ function CampaignDefaults({ configHook }: { configHook: ConfigHook }) {
               onChange={(e) => setSendsPerSecond(e.target.value)}
             />
           </Field>
-          <Field label="First Name Fallback" hint="Used when first_name is empty">
+          <Field label="First Name Fallback" hint="Used when the name is empty">
             <Input value={firstNameFallback} onChange={(e) => setFirstNameFallback(e.target.value)} />
           </Field>
         </div>

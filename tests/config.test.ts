@@ -55,7 +55,26 @@ describe('ConfigService', () => {
     expect(stored).not.toContain(RESEND_KEY);
     expect(stored).not.toContain('ABC123');
 
-    expect(config.getResendApiKey()).toBe(RESEND_KEY);
+    expect(config.getMailerCredentials()).toEqual({ provider: 'resend', apiKey: RESEND_KEY });
+  });
+
+  it('stores keys per provider and reports the selected provider as configured only when complete', () => {
+    const repo = createMemorySettingsRepository();
+    const config = new ConfigService(repo, fakeCipher(), new MemoryLogger());
+    config.save({ settings: { emailProvider: 'mailjet' }, mailjetApiKey: 'mj-public-123' });
+    expect(config.isMailerConfigured()).toBe(false);
+    expect(() => config.getMailerCredentials()).toThrow(/Mailjet secret key is not configured/);
+    const view = config.save({ mailjetSecretKey: 'mj-secret-456', elasticEmailApiKey: 'ee-key-789' });
+    expect(view).toMatchObject({ hasMailjetApiKey: true, hasMailjetSecretKey: true, hasElasticEmailApiKey: true, hasResendApiKey: false });
+    expect(config.isMailerConfigured()).toBe(true);
+    expect(config.getMailerCredentials()).toEqual({ provider: 'mailjet', apiKey: 'mj-public-123', secretKey: 'mj-secret-456' });
+    config.save({ settings: { emailProvider: 'elasticemail' } });
+    expect(config.getMailerCredentials()).toEqual({ provider: 'elasticemail', apiKey: 'ee-key-789' });
+    const stored = JSON.stringify(repo.get('secrets'));
+    for (const secret of ['mj-public-123', 'mj-secret-456', 'ee-key-789']) {
+      expect(stored).not.toContain(secret);
+      expect(JSON.stringify(view)).not.toContain(secret);
+    }
   });
 
   it('normalizes escaped newlines in private keys', () => {
@@ -66,9 +85,10 @@ describe('ConfigService', () => {
     const config = new ConfigService(createMemorySettingsRepository(), fakeCipher(), new MemoryLogger());
     config.save({ resendApiKey: RESEND_KEY });
     config.save({ settings: { fromName: 'Julio' } });
-    expect(config.getResendApiKey()).toBe(RESEND_KEY);
+    expect(config.getMailerCredentials()).toMatchObject({ apiKey: RESEND_KEY });
     config.save({ resendApiKey: null });
-    expect(config.getResendApiKey()).toBeNull();
+    expect(config.isMailerConfigured()).toBe(false);
+    expect(() => config.getMailerCredentials()).toThrow(/Resend API key is not configured/);
   });
 
   it('refuses to store secrets when encryption is unavailable', () => {

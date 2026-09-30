@@ -1,35 +1,37 @@
-import {
-  MAX_BATCH_SIZE,
-  REQUIRED_COLUMNS,
-  SEND_STATUS,
-  TAG,
-  TRACKING_COLUMNS,
-  UNSUBSCRIBED_VALUES,
-} from '../../shared/constants';
+import { MAX_BATCH_SIZE, TAG } from '../../shared/constants';
 import { emailSchema } from '../../shared/schemas';
 import type { ContactRow, SkippedContact } from '../../shared/types';
 
 /**
  * Pure spreadsheet parsing and contact-selection logic.
  * Kept free of Google/Electron imports so every rule can be unit tested.
+ *
+ * Only three things are read from the sheet: a name (Name, or first_name/last_name),
+ * the email address, and the status column (Batch Flag, or tag). All other columns are ignored.
  */
 
 export type HeaderMap = Map<string, number>;
 
 export function normalizeHeader(header: string): string {
-  return header.trim().toLowerCase();
+  return header.trim().toLowerCase().replace(/[\s_-]+/g, ' ');
 }
 
-/**
- * Alternative header names. When the canonical column is absent, the first alias present is
- * used for reading and for status writes, e.g. a sheet with "Batch Flag" instead of "tag".
- */
-export const COLUMN_ALIASES: Record<string, readonly string[]> = {
-  tag: ['batch flag', 'batch_flag'],
-};
+/** Accepted header names per field, in order of preference (already normalized). */
+export const COLUMN_NAMES = {
+  status: ['batch flag', 'tag'],
+  email: ['email', 'email address', 'e mail'],
+  firstName: ['first name', 'firstname'],
+  lastName: ['last name', 'lastname', 'surname'],
+  fullName: ['name', 'full name', 'fullname'],
+} as const;
 
-/** Headers holding a full name, used to derive first_name/last_name when those columns are absent. */
-export const FULL_NAME_HEADERS = ['name', 'full name', 'full_name'] as const;
+export interface SheetColumns {
+  status?: number;
+  email?: number;
+  firstName?: number;
+  lastName?: number;
+  fullName?: number;
+}
 
 /** Maps normalized header name → zero-based column index. The first occurrence wins. */
 export function buildHeaderMap(headerRow: readonly unknown[]): HeaderMap {
@@ -38,16 +40,28 @@ export function buildHeaderMap(headerRow: readonly unknown[]): HeaderMap {
     const name = normalizeHeader(String(cell ?? ''));
     if (name && !map.has(name)) map.set(name, index);
   });
-  for (const [canonical, aliases] of Object.entries(COLUMN_ALIASES)) {
-    if (map.has(canonical)) continue;
-    const alias = aliases.find((a) => map.has(a));
-    if (alias !== undefined) map.set(canonical, map.get(alias) as number);
-  }
   return map;
 }
 
-function fullNameColumn(headers: HeaderMap): string | undefined {
-  return FULL_NAME_HEADERS.find((h) => headers.has(h));
+export function resolveColumns(headers: HeaderMap): SheetColumns {
+  const find = (names: readonly string[]) => names.map((n) => headers.get(n)).find((i) => i !== undefined);
+  return {
+    status: find(COLUMN_NAMES.status),
+    email: find(COLUMN_NAMES.email),
+    firstName: find(COLUMN_NAMES.firstName),
+    lastName: find(COLUMN_NAMES.lastName),
+    fullName: find(COLUMN_NAMES.fullName),
+  };
+}
+
+/** Header text of each column in use, for display. */
+export function describeColumns(columns: SheetColumns, headerRow: readonly unknown[]): { name: string; email: string; status: string } {
+  const label = (i: number | undefined) => (i === undefined ? '' : String(headerRow[i] ?? '').trim());
+  const name =
+    columns.firstName !== undefined
+      ? [label(columns.firstName), label(columns.lastName)].filter(Boolean).join(' + ')
+      : label(columns.fullName);
+  return { name, email: label(columns.email), status: label(columns.status) };
 }
 
 /** "Maria Lopez" → ["Maria", "Lopez"]; "Lopez, Maria" → ["Maria", "Lopez"]. */
@@ -63,20 +77,16 @@ export function splitFullName(fullName: string): { firstName: string; lastName: 
   return { firstName: first, lastName: rest.join(' ') };
 }
 
-const HEADER_HINTS: Record<string, string> = { first_name: 'first_name or Name', tag: 'tag or Batch Flag' };
-
 export function missingRequiredColumns(headers: HeaderMap): string[] {
-  return REQUIRED_COLUMNS.filter((c) => !headers.has(c) && !(c === 'first_name' && fullNameColumn(headers))).map(
-    (c) => HEADER_HINTS[c] ?? c,
-  );
+  const columns = resolveColumns(headers);
+  const missing: string[] = [];
+  if (columns.firstName === undefined && columns.fullName === undefined) missing.push('Name (or first_name)');
+  if (columns.email === undefined) missing.push('Email');
+  if (columns.status === undefined) missing.push('Batch Flag');
+  return missing;
 }
 
-export function missingTrackingColumns(headers: HeaderMap): string[] {
-  return TRACKING_COLUMNS.filter((c) => !headers.has(c));
-}
-
-function cell(row: readonly unknown[], headers: HeaderMap, name: string): string {
-  const index = headers.get(name);
+function cell(row: readonly unknown[], index: number | undefined): string {
   if (index === undefined) return '';
   const value = row[index];
   return value === undefined || value === null ? '' : String(value).trim();
@@ -88,60 +98,52 @@ function cell(row: readonly unknown[], headers: HeaderMap, name: string): string
  * is row 1, so data row i (0-based, excluding header) is sheet row i + 2.
  * Completely empty rows are ignored but still consume a row number.
  */
-export function parseContacts(values: readonly (readonly unknown[])[]): { headers: HeaderMap; contacts: ContactRow[] } {
+export function parseContacts(values: readonly (readonly unknown[])[]): {
+  headers: HeaderMap;
+  columns: SheetColumns;
+  contacts: ContactRow[];
+} {
   const headers = buildHeaderMap(values[0] ?? []);
-  const nameColumn = headers.has('first_name') ? undefined : fullNameColumn(headers);
+  const columns = resolveColumns(headers);
+  const used = [columns.status, columns.email, columns.firstName, columns.lastName, columns.fullName];
   const contacts: ContactRow[] = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i] ?? [];
-    if (row.every((c) => String(c ?? '').trim() === '')) continue;
-    const derived = nameColumn ? splitFullName(cell(row, headers, nameColumn)) : null;
+    if (used.every((index) => cell(row, index) === '')) continue;
+    let firstName = cell(row, columns.firstName);
+    let lastName = cell(row, columns.lastName);
+    if (columns.firstName === undefined) {
+      const split = splitFullName(cell(row, columns.fullName));
+      firstName = split.firstName;
+      if (columns.lastName === undefined) lastName = split.lastName;
+    }
     contacts.push({
       sheetRow: i + 1,
-      firstName: derived ? derived.firstName : cell(row, headers, 'first_name'),
-      lastName: headers.has('last_name') || !derived ? cell(row, headers, 'last_name') : derived.lastName,
-      email: cell(row, headers, 'email'),
-      company: cell(row, headers, 'company'),
-      tag: cell(row, headers, 'tag'),
-      sendStatus: cell(row, headers, 'send_status'),
-      campaignId: cell(row, headers, 'campaign_id'),
-      sentAt: cell(row, headers, 'sent_at'),
-      resendEmailId: cell(row, headers, 'resend_email_id'),
-      lastError: cell(row, headers, 'last_error'),
-      unsubscribed: cell(row, headers, 'unsubscribed'),
+      firstName,
+      lastName,
+      email: cell(row, columns.email),
+      tag: cell(row, columns.status),
     });
   }
-  return { headers, contacts };
+  return { headers, columns, contacts };
 }
 
 export function isNewTag(tag: string): boolean {
   return tag.trim().toLowerCase() === TAG.New.toLowerCase();
 }
 
-export function isUnsubscribed(value: string): boolean {
-  return (UNSUBSCRIBED_VALUES as readonly string[]).includes(value.trim().toLowerCase());
-}
-
 export function isValidEmail(email: string): boolean {
   return emailSchema.safeParse(email.trim()).success;
 }
 
-/** True when the row shows any sign of a previous successful send. */
+/** True when the row's status shows a previous successful send. */
 export function looksAlreadySent(contact: ContactRow): boolean {
-  return (
-    contact.tag.trim().toLowerCase() === TAG.Sent.toLowerCase() ||
-    contact.sendStatus.trim().toLowerCase() === SEND_STATUS.Sent ||
-    contact.resendEmailId.trim() !== ''
-  );
+  return contact.tag.trim().toLowerCase() === TAG.Sent.toLowerCase();
 }
 
+/** Reserved by a campaign that never finished with it (crash, unknown delivery, failed sheet write). */
 export function isStaleProcessing(contact: ContactRow): boolean {
-  const status = contact.sendStatus.trim().toLowerCase();
-  return (
-    contact.tag.trim().toLowerCase() === TAG.Processing.toLowerCase() ||
-    status === SEND_STATUS.Processing ||
-    status === SEND_STATUS.Review
-  );
+  return contact.tag.trim().toLowerCase() === TAG.Processing.toLowerCase();
 }
 
 export function findStaleProcessing(contacts: readonly ContactRow[]): ContactRow[] {
@@ -163,8 +165,14 @@ export interface SelectionResult {
  * Walks New contacts in sheet order and picks up to `batchSize` eligible ones.
  * Ineligible New contacts seen along the way are reported as skipped.
  * The batch size is clamped to MAX_BATCH_SIZE here, so no caller can exceed it.
+ * `pendingSentEmails` are addresses the provider accepted but whose row could not be marked
+ * Sent (kept locally for manual review); they are never emailed again automatically.
  */
-export function selectContacts(contacts: readonly ContactRow[], requestedBatchSize: number): SelectionResult {
+export function selectContacts(
+  contacts: readonly ContactRow[],
+  requestedBatchSize: number,
+  pendingSentEmails: ReadonlySet<string> = new Set(),
+): SelectionResult {
   const batchSize = clampBatchSize(requestedBatchSize);
   const newContacts = contacts.filter((c) => isNewTag(c.tag));
 
@@ -191,12 +199,10 @@ export function selectContacts(contacts: readonly ContactRow[], requestedBatchSi
 
     if (!email) {
       skip(contact, 'blank_email', 'Email is blank');
-    } else if (isUnsubscribed(contact.unsubscribed)) {
-      skip(contact, 'unsubscribed', 'Contact is unsubscribed');
     } else if (!isValidEmail(email)) {
       skip(contact, 'invalid_email', 'Email address is not valid');
-    } else if (contact.resendEmailId || contact.sendStatus.trim().toLowerCase() === SEND_STATUS.Sent) {
-      skip(contact, 'already_sent', 'Row already has a successful send recorded');
+    } else if (pendingSentEmails.has(key)) {
+      skip(contact, 'already_sent', 'An earlier campaign already sent this email but could not mark the row Sent (see Review)');
     } else if (seen.has(key)) {
       skip(contact, 'duplicate_in_campaign', 'Same email appears earlier in this campaign');
     } else if (alreadySentRows.has(key)) {

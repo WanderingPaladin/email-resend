@@ -5,6 +5,7 @@ import {
   DEFAULT_FIRST_NAME_FALLBACK,
   DEFAULT_SENDS_PER_SECOND,
   DEFAULT_WORKSHEET_NAME,
+  EMAIL_PROVIDERS,
   MAX_BATCH_SIZE,
   MAX_CONCURRENCY,
   MAX_SENDS_PER_SECOND,
@@ -22,6 +23,8 @@ export const emailSchema = z.email();
 
 export const bodyFormatSchema = z.enum(['text', 'html']);
 
+export const emailProviderSchema = z.enum(EMAIL_PROVIDERS);
+
 const trimmed = (max: number) => z.string().trim().max(max);
 
 /** Non-secret settings persisted with electron-store. */
@@ -29,6 +32,7 @@ export const settingsSchema = z.object({
   spreadsheetId: trimmed(200).default(''),
   worksheetName: trimmed(100).default(DEFAULT_WORKSHEET_NAME),
   serviceAccountEmail: trimmed(320).default(''),
+  emailProvider: emailProviderSchema.default('resend'),
   fromName: trimmed(200).default(''),
   fromEmail: trimmed(320).default(''),
   lastSubject: z.string().max(998).default(''),
@@ -58,6 +62,9 @@ const secretInput = z.string().trim().min(1).max(20_000).nullable().optional();
 export const saveConfigInputSchema = z.object({
   settings: settingsSchema.partial().optional(),
   resendApiKey: secretInput,
+  elasticEmailApiKey: secretInput,
+  mailjetApiKey: secretInput,
+  mailjetSecretKey: secretInput,
   googlePrivateKey: secretInput,
 });
 
@@ -94,8 +101,6 @@ export const campaignStartInputSchema = emailContentSchema.extend({
   batchSize: z.number().int().min(MIN_BATCH_SIZE).max(MAX_BATCH_SIZE),
   concurrency: z.number().int().min(MIN_CONCURRENCY).max(MAX_CONCURRENCY),
   dryRun: z.boolean(),
-  /** Operator confirmed that missing tracking columns may be appended to the header row. */
-  initializeTrackingColumns: z.boolean().default(false),
 });
 
 export type CampaignStartInput = z.infer<typeof campaignStartInputSchema>;

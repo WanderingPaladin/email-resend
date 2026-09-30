@@ -10,6 +10,9 @@ import { createFileJournal } from './services/journal.service';
 import { LoggerService } from './services/logger.service';
 import { chromiumFetch } from './services/network';
 import { RecoveryService } from './services/recovery.service';
+import { ElasticEmailService } from './services/elastic-email.service';
+import { MailjetService } from './services/mailjet.service';
+import type { Mailer } from './services/mailer';
 import { createResendClient, ResendService } from './services/resend.service';
 import { safeStorageCipher } from './services/secret-cipher';
 
@@ -21,7 +24,7 @@ export interface AppContext {
   campaign: CampaignService;
   recovery: RecoveryService;
   createSheets(): GoogleSheetsService;
-  createMailer(): ResendService;
+  createMailer(): Mailer;
 }
 
 export function createAppContext(): AppContext {
@@ -51,10 +54,18 @@ export function createAppContext(): AppContext {
     );
   };
 
-  const createMailer = (): ResendService => {
-    const apiKey = config.getResendApiKey();
-    if (!apiKey) throw new Error('Resend API key is not configured. Add it in Settings.');
-    return new ResendService(createResendClient(apiKey), logger, { sendsPerSecond: config.getSettings().sendsPerSecond });
+  /** Builds a client for the provider selected in Settings. Throws a user-facing error when it is not configured. */
+  const createMailer = (): Mailer => {
+    const credentials = config.getMailerCredentials();
+    const options = { sendsPerSecond: config.getSettings().sendsPerSecond };
+    switch (credentials.provider) {
+      case 'elasticemail':
+        return new ElasticEmailService(credentials.apiKey, logger, options, chromiumFetch);
+      case 'mailjet':
+        return new MailjetService(credentials.apiKey, credentials.secretKey, logger, options, chromiumFetch);
+      default:
+        return new ResendService(createResendClient(credentials.apiKey), logger, options);
+    }
   };
 
   const campaign = new CampaignService({

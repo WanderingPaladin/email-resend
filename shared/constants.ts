@@ -14,7 +14,7 @@ export const MIN_CONCURRENCY = 1;
 export const MAX_CONCURRENCY = 10;
 export const DEFAULT_CONCURRENCY = 5;
 
-/** Resend's default team rate limit is low; we throttle sends to stay under it. */
+/** Email providers have per-second rate limits (Resend's default is low); sends are throttled to stay under them. */
 export const MIN_SENDS_PER_SECOND = 1;
 export const MAX_SENDS_PER_SECOND = 10;
 export const DEFAULT_SENDS_PER_SECOND = 2;
@@ -28,7 +28,7 @@ export const CAMPAIGN_HISTORY_LIMIT = 50;
 /** Maximum number of log lines kept in memory / rendered in the UI. */
 export const LOG_BUFFER_LIMIT = 1000;
 
-/** Values written to the `tag` column. */
+/** Values in the Batch Flag (or `tag`) column. */
 export const TAG = {
   New: 'New',
   Processing: 'Processing',
@@ -36,42 +36,31 @@ export const TAG = {
   Failed: 'Failed',
 } as const;
 
-/** Values written to the `send_status` column. */
-export const SEND_STATUS = {
-  Processing: 'processing',
-  Sent: 'sent',
-  Failed: 'failed',
-  /** Resend may or may not have accepted the email. Never retried automatically. */
-  Review: 'review',
-} as const;
-
-/** Columns the app needs to find contacts. */
+/**
+ * The only columns the app reads: a name (Name, or first_name/last_name), Email, and the
+ * status column (Batch Flag, or tag). Every other column is ignored and never written.
+ */
 export const REQUIRED_COLUMNS = ['first_name', 'email', 'tag'] as const;
 
-/** Columns the app writes to while tracking a campaign. */
-export const TRACKING_COLUMNS = [
-  'send_status',
-  'campaign_id',
-  'sent_at',
-  'resend_email_id',
-  'last_error',
-] as const;
-
-export const OPTIONAL_COLUMNS = ['last_name', 'company', 'unsubscribed'] as const;
-
-/** Values in the `unsubscribed` column that mean "never email this contact". */
-export const UNSUBSCRIBED_VALUES = ['true', 'yes', '1', 'unsubscribed'] as const;
-
 /** Template variables supported in subject and body. */
-export const TEMPLATE_VARIABLES = ['first_name', 'last_name', 'email', 'company'] as const;
+export const TEMPLATE_VARIABLES = ['first_name', 'last_name', 'email'] as const;
 
 /** Mock contact used for test emails. */
 export const TEST_EMAIL_VARIABLES = {
   first_name: 'John',
   last_name: 'Doe',
   email: 'john@example.com',
-  company: 'Example Inc.',
 } as const;
+
+/** Email sending services the app can use. One is active at a time (Settings). */
+export const EMAIL_PROVIDERS = ['resend', 'elasticemail', 'mailjet'] as const;
+export type EmailProviderId = (typeof EMAIL_PROVIDERS)[number];
+
+export const EMAIL_PROVIDER_LABELS: Record<EmailProviderId, string> = {
+  resend: 'Resend',
+  elasticemail: 'Elastic Email',
+  mailjet: 'Mailjet',
+};
 
 /** Marker used in logs when an email was accepted but the sheet could not be updated. */
 export const EMAIL_SENT_SHEET_UPDATE_FAILED = 'EMAIL_SENT_SHEET_UPDATE_FAILED';
@@ -89,10 +78,9 @@ export const IPC = {
   configImportServiceAccount: 'config:import-service-account',
 
   googleTest: 'google:test',
-  googleInitColumns: 'google:init-columns',
   contactsPreview: 'contacts:preview',
 
-  resendValidate: 'resend:validate',
+  mailerValidate: 'mailer:validate',
 
   campaignSendTest: 'campaign:send-test',
   campaignStart: 'campaign:start',

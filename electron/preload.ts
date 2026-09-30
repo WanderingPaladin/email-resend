@@ -34,11 +34,10 @@ const api: EmailAppApi = {
   },
   google: {
     testConnection: () => invoke(IPC.googleTest),
-    initializeTrackingColumns: () => invoke(IPC.googleInitColumns),
     previewContacts: (batchSize) => invoke(IPC.contactsPreview, { batchSize }),
   },
-  resend: {
-    validate: () => invoke(IPC.resendValidate),
+  mailer: {
+    validate: () => invoke(IPC.mailerValidate),
   },
   campaign: {
     sendTest: (input) => invoke(IPC.campaignSendTest, input),

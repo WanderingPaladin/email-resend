@@ -33,13 +33,13 @@ function isTrustedUrl(url: string): boolean {
   return withoutHash === rendererFileUrl;
 }
 
-// Production CSP. The same policy is injected as a <meta> tag into the built index.html
+// Production CSP (remote https images are allowed so email previews show them). The same policy is injected as a <meta> tag into the built index.html
 // (see electron.vite.config.ts) because response headers do not apply to file:// pages.
 const PROD_CSP =
-  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
+  "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; font-src 'self'; connect-src 'self'; object-src 'none'; base-uri 'none'; form-action 'none'; frame-ancestors 'none'";
 // Vite's dev server needs inline scripts (React refresh) and a websocket for HMR.
 const DEV_CSP =
-  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src 'self' ws: http://localhost:*; object-src 'none'; base-uri 'none'";
+  "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: https:; connect-src 'self' ws: http://localhost:*; object-src 'none'; base-uri 'none'";
 
 // ---------------------------------------------------------------------------
 // 1. Single instance: a second launch focuses the existing window and exits.

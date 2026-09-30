@@ -37,9 +37,6 @@ export class FakeSheetsGateway implements SheetsGateway {
   /** Throw from the next N batchWrite calls. */
   failWrites = 0;
   failWriteError: unknown = Object.assign(new Error('Service unavailable'), { response: { status: 403 } });
-  /** Grid width, like Google's columnCount. Writes beyond it fail as Google's do. */
-  columnCount = 26;
-  gridResizes = 0;
   /** Called before each read so tests can mutate the sheet mid-campaign. */
   beforeRead?: () => void;
 
@@ -71,14 +68,6 @@ export class FakeSheetsGateway implements SheetsGateway {
     return { title: this.title, sheets: [{ title: this.worksheetName, rowCount: 1000 }] };
   }
 
-  async ensureColumnCount(_id: string, worksheetName: string, minColumns: number): Promise<void> {
-    this.checkSheet(worksheetName);
-    if (this.columnCount < minColumns) {
-      this.columnCount = minColumns;
-      this.gridResizes++;
-    }
-  }
-
   async getValues(_id: string, range: string): Promise<string[][]> {
     this.beforeRead?.();
     this.reads++;
@@ -98,11 +87,6 @@ export class FakeSheetsGateway implements SheetsGateway {
       const { sheet, cell } = this.parse(w.range);
       this.checkSheet(sheet);
       if (!cell) throw new Error('Only single-cell writes are expected');
-      if (cell.col >= this.columnCount) {
-        throw Object.assign(new Error(`Range exceeds grid limits. Max columns: ${this.columnCount}`), {
-          response: { status: 400 },
-        });
-      }
       const rowIndex = cell.row - 1;
       while (this.rows.length <= rowIndex) this.rows.push([]);
       const row = this.rows[rowIndex] ?? [];
@@ -120,19 +104,8 @@ export class FakeSheetsGateway implements SheetsGateway {
   }
 }
 
-export const FULL_HEADERS = [
-  'first_name',
-  'last_name',
-  'email',
-  'tag',
-  'company',
-  'unsubscribed',
-  'send_status',
-  'campaign_id',
-  'sent_at',
-  'resend_email_id',
-  'last_error',
-];
+/** first_name/last_name/email/tag plus a column the app must never read or write. */
+export const FULL_HEADERS = ['first_name', 'last_name', 'email', 'tag', 'notes'];
 
 /** Builds sheet rows from partial objects using FULL_HEADERS. */
 export function sheetRows(contacts: Record<string, string>[], headers = FULL_HEADERS): string[][] {
@@ -189,4 +162,33 @@ export function createHarness(rows: string[][]) {
   const sheets = new GoogleSheetsService(gateway, target, logger, { sleepFn: noSleep });
   const mailer = new ResendService(client, logger, { sendsPerSecond: 10, sleepFn: noSleep, now: () => 0 });
   return { logger, gateway, client, repo, sheets, mailer };
+}
+
+/** Records requests and answers them from a queue of scripted responses (default: 200 {}). */
+export class FakeFetch {
+  calls: { url: string; method: string; headers: Record<string, string>; body: unknown }[] = [];
+  responses: (Response | Error)[] = [];
+
+  reply(status: number, body: unknown) {
+    this.responses.push(new Response(JSON.stringify(body), { status, headers: { 'Content-Type': 'application/json' } }));
+    return this;
+  }
+
+  fail(error: Error) {
+    this.responses.push(error);
+    return this;
+  }
+
+  fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+    const headers = Object.fromEntries(new Headers(init?.headers).entries());
+    this.calls.push({
+      url: String(input),
+      method: init?.method ?? 'GET',
+      headers,
+      body: typeof init?.body === 'string' ? (JSON.parse(init.body) as unknown) : undefined,
+    });
+    const next = this.responses.shift() ?? new Response('{}', { status: 200 });
+    if (next instanceof Error) throw next;
+    return next;
+  }) as typeof fetch;
 }

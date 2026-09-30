@@ -1,3 +1,4 @@
+import { EMAIL_PROVIDER_LABELS, type EmailProviderId } from '../../shared/constants';
 import { settingsSchema, serviceAccountFileSchema, type SaveConfigInput, type Settings } from '../../shared/schemas';
 import type { ConfigView } from '../../shared/types';
 import type { EncryptedSecrets, SettingsRepository } from '../repositories/settings.repository';
@@ -16,6 +17,21 @@ export interface GoogleCredentials {
 }
 
 type SecretName = keyof EncryptedSecrets;
+
+/** Email provider secrets that can be saved from Settings. */
+const MAILER_SECRETS = ['resendApiKey', 'elasticEmailApiKey', 'mailjetApiKey', 'mailjetSecretKey'] as const;
+
+/** Secrets each provider needs before it can send. */
+const PROVIDER_SECRETS: Record<EmailProviderId, readonly (typeof MAILER_SECRETS)[number][]> = {
+  resend: ['resendApiKey'],
+  elasticemail: ['elasticEmailApiKey'],
+  mailjet: ['mailjetApiKey', 'mailjetSecretKey'],
+};
+
+export type MailerCredentials =
+  | { provider: 'resend'; apiKey: string }
+  | { provider: 'elasticemail'; apiKey: string }
+  | { provider: 'mailjet'; apiKey: string; secretKey: string };
 
 /**
  * Normalizes a pasted private key. Keys copied out of JSON often contain literal "\n"
@@ -52,6 +68,9 @@ export class ConfigService {
     return {
       settings: this.getSettings(),
       hasResendApiKey: Boolean(secrets.resendApiKey),
+      hasElasticEmailApiKey: Boolean(secrets.elasticEmailApiKey),
+      hasMailjetApiKey: Boolean(secrets.mailjetApiKey),
+      hasMailjetSecretKey: Boolean(secrets.mailjetSecretKey),
       hasGooglePrivateKey: Boolean(secrets.googlePrivateKey),
       encryptionAvailable: this.cipher.isAvailable(),
     };
@@ -62,7 +81,10 @@ export class ConfigService {
       const next = settingsSchema.parse({ ...this.getSettings(), ...input.settings });
       this.repo.set('settings', next);
     }
-    if (input.resendApiKey !== undefined) this.setSecret('resendApiKey', input.resendApiKey);
+    for (const name of MAILER_SECRETS) {
+      const value = input[name];
+      if (value !== undefined) this.setSecret(name, value);
+    }
     if (input.googlePrivateKey !== undefined) {
       this.setSecret(
         'googlePrivateKey',
@@ -71,7 +93,9 @@ export class ConfigService {
     }
     this.logger.info('config', 'Configuration saved', {
       settingsChanged: input.settings ? Object.keys(input.settings).join(',') : '',
-      resendApiKey: input.resendApiKey === undefined ? 'unchanged' : input.resendApiKey === null ? 'removed' : 'updated',
+      secretsChanged: MAILER_SECRETS.filter((n) => input[n] !== undefined)
+        .map((n) => `${n}:${input[n] === null ? 'removed' : 'updated'}`)
+        .join(','),
       googlePrivateKey:
         input.googlePrivateKey === undefined ? 'unchanged' : input.googlePrivateKey === null ? 'removed' : 'updated',
     });
@@ -99,8 +123,20 @@ export class ConfigService {
     return { clientEmail: parsed.data.client_email };
   }
 
-  getResendApiKey(): string | null {
-    return this.getSecret('resendApiKey');
+  /** Decrypted credentials for the selected provider. Throws a user-facing error when any are missing. */
+  getMailerCredentials(): MailerCredentials {
+    const provider = this.getSettings().emailProvider;
+    const label = EMAIL_PROVIDER_LABELS[provider];
+    const need = (name: SecretName, what: string) => {
+      const value = this.getSecret(name);
+      if (!value) throw new Error(`${label} ${what} is not configured. Add it in Settings.`);
+      return value;
+    };
+    if (provider === 'mailjet') {
+      return { provider, apiKey: need('mailjetApiKey', 'API key'), secretKey: need('mailjetSecretKey', 'secret key') };
+    }
+    if (provider === 'elasticemail') return { provider, apiKey: need('elasticEmailApiKey', 'API key') };
+    return { provider, apiKey: need('resendApiKey', 'API key') };
   }
 
   getGoogleCredentials(): GoogleCredentials | null {
@@ -115,8 +151,10 @@ export class ConfigService {
     return Boolean(s.spreadsheetId && s.worksheetName && s.serviceAccountEmail && this.repo.get('secrets').googlePrivateKey);
   }
 
-  isResendConfigured(): boolean {
-    return Boolean(this.repo.get('secrets').resendApiKey);
+  /** True when the selected email provider has all its credentials stored. */
+  isMailerConfigured(): boolean {
+    const secrets = this.repo.get('secrets');
+    return PROVIDER_SECRETS[this.getSettings().emailProvider].every((name) => Boolean(secrets[name]));
   }
 
   private setSecret(name: SecretName, value: string | null): void {
