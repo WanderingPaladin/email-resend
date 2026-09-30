@@ -38,6 +38,10 @@ export interface SheetsGateway {
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
   /** Adds columns to the worksheet's grid until it has at least `minColumns`. Google rejects writes outside the grid. */
   ensureColumnCount(spreadsheetId: string, worksheetName: string, minColumns: number): Promise<void>;
+  /** Adds a new, empty tab. */
+  addWorksheet(spreadsheetId: string, title: string, rowCount: number, columnCount: number): Promise<void>;
+  /** Writes a block of rows starting at `range` (e.g. 'Tab'!A1). */
+  writeRows(spreadsheetId: string, range: string, rows: string[][]): Promise<void>;
 }
 
 /**
@@ -101,6 +105,21 @@ export function createSheetsClient(credentials: GoogleCredentials, fetchImplemen
         requestBody: {
           requests: [{ appendDimension: { sheetId: props.sheetId, dimension: 'COLUMNS', length: minColumns - columnCount } }],
         },
+      });
+    },
+    async addWorksheet(spreadsheetId, title, rowCount, columnCount) {
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: [{ addSheet: { properties: { title, gridProperties: { rowCount, columnCount } } } }] },
+      });
+    },
+    async writeRows(spreadsheetId, range, rows) {
+      await sheets.spreadsheets.values.update({
+        spreadsheetId,
+        range,
+        // RAW: text found on the web is stored literally and can never become a formula.
+        valueInputOption: 'RAW',
+        requestBody: { values: rows },
       });
     },
   };
@@ -286,6 +305,8 @@ export class GoogleSheetsService {
       );
     }
     const snapshot = await this.readSheet();
+    const newRows = snapshot.contacts.filter((c) => isNewTag(c.tag));
+    const withEmail = newRows.filter((c) => c.email !== '').length;
     this.logger.info('google', 'Google Sheets connection successful', {
       spreadsheet: meta.title,
       worksheet: this.target.worksheetName,
@@ -296,11 +317,37 @@ export class GoogleSheetsService {
       worksheetName: this.target.worksheetName,
       worksheets,
       rowCount: snapshot.contacts.length,
-      newCount: snapshot.contacts.filter((c) => isNewTag(c.tag)).length,
-      headers: snapshot.headerNames,
+      newCount: withEmail,
+      newWithoutEmailCount: newRows.length - withEmail,
       columns: describeColumns(snapshot.columns, snapshot.headerNames),
+      trackingColumns: Object.values(snapshot.columns.tracking).map((i) => String(snapshot.headerNames[i] ?? '').trim()),
       missingTrackingColumns: snapshot.missingTrackingColumns,
     };
+  }
+
+  /**
+   * Creates a new tab and fills it with `rows` (the first row is the header).
+   * Refuses to touch an existing tab.
+   */
+  async createWorksheet(title: string, rows: string[][]): Promise<{ tabName: string; rows: number }> {
+    const meta = await this.call('metadata read', () => this.gateway.getSpreadsheet(this.target.spreadsheetId));
+    if (meta.sheets.some((s) => s.title.toLowerCase() === title.toLowerCase())) {
+      throw new GoogleSheetsError(`A tab named "${title}" already exists. Choose another name.`, 'tab_exists');
+    }
+    const columns = Math.max(26, ...rows.map((r) => r.length));
+    await this.call('add tab', async () => {
+      try {
+        await this.gateway.addWorksheet(this.target.spreadsheetId, title, rows.length + 100, columns);
+      } catch (error) {
+        // A retry after a lost response finds the tab already created: that is success.
+        const again = await this.gateway.getSpreadsheet(this.target.spreadsheetId).catch(() => null);
+        if (again?.sheets.some((s) => s.title === title)) return;
+        throw error;
+      }
+    });
+    await this.call('write new tab', () => this.gateway.writeRows(this.target.spreadsheetId, `${quoteSheetName(title)}!A1`, rows));
+    this.logger.info('google', `Created tab "${title}" with ${rows.length - 1} row(s)`);
+    return { tabName: title, rows: rows.length - 1 };
   }
 
   async getHeaders(): Promise<string[]> {
@@ -320,7 +367,8 @@ export class GoogleSheetsService {
     const missing = missingRequiredColumns(headers);
     if (missing.length > 0) {
       throw new GoogleSheetsError(
-        `Required column(s) missing from the header row: ${missing.join(', ')}. Found: ${(values[0] ?? []).join(', ')}`,
+        `Required column(s) missing from the header row: ${missing.join(', ')}. ` +
+          'The app uses only Name (or First Name and Last Name), Email, Batch Flag and its tracking columns; other columns are ignored.',
         'missing_headers',
       );
     }

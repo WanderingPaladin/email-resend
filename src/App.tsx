@@ -10,6 +10,7 @@ import { useLogs } from '@/hooks/useLogs';
 import { useRecovery } from '@/hooks/useRecovery';
 import { CampaignPage } from '@/pages/CampaignPage';
 import { DashboardPage } from '@/pages/DashboardPage';
+import { FindContactsPage } from '@/pages/FindContactsPage';
 import { LogsPage } from '@/pages/LogsPage';
 import { RecoveryPage } from '@/pages/RecoveryPage';
 import { SettingsPage } from '@/pages/SettingsPage';
@@ -85,6 +86,7 @@ export function App() {
               onNavigate={navigate}
             />
           )}
+          {page === 'find' && <FindContactsPage config={configHook.config} onNavigate={navigate} />}
           {page === 'settings' && <SettingsPage configHook={configHook} onSaved={reloadStatus} />}
           {page === 'logs' && <LogsPage logs={logs} initialFilter={logFilter} logDirectory={status?.logDirectory ?? ''} />}
           {page === 'recovery' && <RecoveryPage recovery={recovery} />}

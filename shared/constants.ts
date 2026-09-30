@@ -100,6 +100,10 @@ export const IPC = {
 
   mailerValidate: 'mailer:validate',
 
+  openaiValidate: 'openai:validate',
+  finderSearch: 'finder:search',
+  finderSave: 'finder:save',
+
   campaignSendTest: 'campaign:send-test',
   campaignStart: 'campaign:start',
   campaignCancel: 'campaign:cancel',
@@ -117,3 +121,9 @@ export const IPC = {
   logsOpenFolder: 'logs:open-folder',
   logsEvent: 'logger:event',
 } as const;
+
+/** Default OpenAI model for contact search. Any model that supports the web_search tool works. */
+export const DEFAULT_OPENAI_MODEL = 'gpt-6.1-sol';
+export const MAX_FINDER_RESULTS = 50;
+/** Columns of a tab created from search results. Batch Flag is left empty until the operator reviews each contact. */
+export const FINDER_TAB_HEADERS = ['Name', 'Email', 'Organization', 'Role', 'Source URL', 'Email on page', 'Batch Flag'] as const;

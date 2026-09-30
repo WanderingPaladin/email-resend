@@ -5,6 +5,7 @@ import { APP_NAME } from '../shared/constants';
 import { createAppContext, type AppContext } from './app-context';
 import { registerCampaignIpc } from './ipc/campaign.ipc';
 import { registerConfigIpc } from './ipc/config.ipc';
+import { registerFinderIpc } from './ipc/finder.ipc';
 import { registerGoogleIpc } from './ipc/google.ipc';
 import type { IpcDeps } from './ipc/handle';
 import { registerLogsIpc } from './ipc/logs.ipc';
@@ -88,6 +89,7 @@ function startup(): void {
   const deps: IpcDeps = { logger, isTrustedUrl };
   registerConfigIpc(ctx, deps);
   registerGoogleIpc(ctx, deps);
+  registerFinderIpc(ctx, deps);
   registerCampaignIpc(ctx, deps);
   registerLogsIpc(ctx, deps);
 

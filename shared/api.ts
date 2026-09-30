@@ -1,4 +1,4 @@
-import type { CampaignStartInput, SaveConfigInput, SendTestInput, RecoveryApplyInput } from './schemas';
+import type { CampaignStartInput, FinderSaveInput, FinderSearchInput, SaveConfigInput, SendTestInput, RecoveryApplyInput } from './schemas';
 import type {
   AppStatus,
   CampaignHistoryEntry,
@@ -7,6 +7,8 @@ import type {
   CampaignState,
   CampaignSummary,
   ConfigView,
+  FinderSaveResult,
+  FinderSearchResult,
   GoogleTestResult,
   LogEntry,
   PreviewResult,
@@ -37,6 +39,13 @@ export interface EmailAppApi {
     testConnection(): Promise<GoogleTestResult>;
     initializeTrackingColumns(): Promise<{ added: string[] }>;
     previewContacts(batchSize: number): Promise<PreviewResult>;
+  };
+  finder: {
+    /** Checks the OpenAI key and model without running a search. */
+    validate(): Promise<{ message: string }>;
+    search(input: FinderSearchInput): Promise<FinderSearchResult>;
+    /** Creates a new tab in the spreadsheet with the given contacts. */
+    save(input: FinderSaveInput): Promise<FinderSaveResult>;
   };
   mailer: {
     /** Checks the selected provider's credentials without sending an email. */

@@ -8,6 +8,7 @@ export interface EncryptedSecrets {
   elasticEmailApiKey?: string;
   mailjetApiKey?: string;
   mailjetSecretKey?: string;
+  openaiApiKey?: string;
   googlePrivateKey?: string;
 }
 

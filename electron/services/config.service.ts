@@ -71,6 +71,7 @@ export class ConfigService {
       hasElasticEmailApiKey: Boolean(secrets.elasticEmailApiKey),
       hasMailjetApiKey: Boolean(secrets.mailjetApiKey),
       hasMailjetSecretKey: Boolean(secrets.mailjetSecretKey),
+      hasOpenAiApiKey: Boolean(secrets.openaiApiKey),
       hasGooglePrivateKey: Boolean(secrets.googlePrivateKey),
       encryptionAvailable: this.cipher.isAvailable(),
     };
@@ -85,6 +86,7 @@ export class ConfigService {
       const value = input[name];
       if (value !== undefined) this.setSecret(name, value);
     }
+    if (input.openaiApiKey !== undefined) this.setSecret('openaiApiKey', input.openaiApiKey);
     if (input.googlePrivateKey !== undefined) {
       this.setSecret(
         'googlePrivateKey',
@@ -96,6 +98,8 @@ export class ConfigService {
       secretsChanged: MAILER_SECRETS.filter((n) => input[n] !== undefined)
         .map((n) => `${n}:${input[n] === null ? 'removed' : 'updated'}`)
         .join(','),
+      openaiApiKey:
+        input.openaiApiKey === undefined ? 'unchanged' : input.openaiApiKey === null ? 'removed' : 'updated',
       googlePrivateKey:
         input.googlePrivateKey === undefined ? 'unchanged' : input.googlePrivateKey === null ? 'removed' : 'updated',
     });
@@ -137,6 +141,13 @@ export class ConfigService {
     }
     if (provider === 'elasticemail') return { provider, apiKey: need('elasticEmailApiKey', 'API key') };
     return { provider, apiKey: need('resendApiKey', 'API key') };
+  }
+
+  /** Decrypted OpenAI key and model for contact search. Throws a user-facing error when the key is missing. */
+  getOpenAiCredentials(): { apiKey: string; model: string } {
+    const apiKey = this.getSecret('openaiApiKey');
+    if (!apiKey) throw new Error('OpenAI API key is not configured. Add it in Settings.');
+    return { apiKey, model: this.getSettings().openaiModel };
   }
 
   getGoogleCredentials(): GoogleCredentials | null {

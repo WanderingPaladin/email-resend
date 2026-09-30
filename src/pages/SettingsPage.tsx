@@ -11,6 +11,7 @@ import {
 import { ConnectionStatus } from '@/components/ConnectionStatus';
 import { GoogleSheetSettings } from '@/components/GoogleSheetSettings';
 import { EmailProviderSettings } from '@/components/EmailProviderSettings';
+import { OpenAiSettings } from '@/components/OpenAiSettings';
 import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -66,6 +67,7 @@ export function SettingsPage({ configHook, onSaved }: { configHook: ConfigHook; 
       </Card>
       <GoogleSheetSettings configHook={configHook} onSaved={onSaved} />
       <EmailProviderSettings configHook={configHook} onSaved={onSaved} />
+      <OpenAiSettings configHook={configHook} />
       <CampaignDefaults configHook={configHook} />
     </>
   );

@@ -23,6 +23,7 @@ export interface ConfigView {
   hasElasticEmailApiKey: boolean;
   hasMailjetApiKey: boolean;
   hasMailjetSecretKey: boolean;
+  hasOpenAiApiKey: boolean;
   hasGooglePrivateKey: boolean;
   /** False when the OS cannot encrypt secrets (e.g. Linux without a keyring). */
   encryptionAvailable: boolean;
@@ -90,11 +91,16 @@ export interface GoogleTestResult {
   spreadsheetTitle: string;
   worksheetName: string;
   worksheets: string[];
+  /** Rows with anything in the Name, Email, Batch Flag or tracking columns. */
   rowCount: number;
+  /** New rows that have an email address (the ones a campaign can send to). */
   newCount: number;
-  headers: string[];
+  /** New rows with an empty Email cell; they are ignored. */
+  newWithoutEmailCount: number;
   /** Which sheet columns are used, e.g. { name: 'Name', email: 'Email', status: 'Batch Flag' }. */
   columns: { name: string; email: string; status: string };
+  /** Header labels of the tracking columns found on the sheet. */
+  trackingColumns: string[];
   missingTrackingColumns: string[];
 }
 
@@ -234,7 +240,7 @@ export interface RecoveryApplyResult {
 // ---------------------------------------------------------------------------
 
 export type LogLevel = 'debug' | 'info' | 'warn' | 'error';
-export type LogCategory = 'app' | 'config' | 'google' | 'resend' | 'campaign' | 'ipc';
+export type LogCategory = 'app' | 'config' | 'google' | 'resend' | 'campaign' | 'finder' | 'ipc';
 
 export interface LogEntry {
   id: string;
@@ -260,4 +266,32 @@ export interface AppStatus {
   manualReviewCount: number;
   interruptedCampaignId: string;
   logDirectory: string;
+}
+
+// ---------------------------------------------------------------------------
+// Contact search (OpenAI web search)
+// ---------------------------------------------------------------------------
+
+export interface FoundContact {
+  name: string;
+  email: string;
+  organization: string;
+  role: string;
+  /** Public page where the email was found. */
+  sourceUrl: string;
+  /** Whether the email appears on the source page when the app opens it ('unknown' when the page could not be read). */
+  emailOnPage: 'yes' | 'no' | 'unknown';
+}
+
+export interface FinderSearchResult {
+  contacts: FoundContact[];
+  /** Results dropped before showing: invalid email, no source page, repeated, or already in the Emails tab. */
+  dropped: { invalid: number; noSource: number; duplicate: number; alreadyInSheet: number };
+  /** False when the main sheet could not be read to drop existing contacts. */
+  checkedAgainstSheet: boolean;
+}
+
+export interface FinderSaveResult {
+  tabName: string;
+  rows: number;
 }

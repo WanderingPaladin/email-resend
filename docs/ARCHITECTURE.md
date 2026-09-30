@@ -35,7 +35,8 @@ Main process (electron/)         Zod-validated IPC handlers → services
 | File | Responsibility |
 | --- | --- |
 | `config.service.ts` | Settings (electron-store) + encrypted secrets. |
-| `google-sheets.service.ts` | Connection test, reading/parsing the sheet, tracking-column initialization (widening the grid first), verified row updates. |
+| `google-sheets.service.ts` | Connection test, reading/parsing the sheet, tracking-column initialization (widening the grid first), verified row updates, creating a new tab for Find Contacts results. |
+| `contact-finder.service.ts` | Find Contacts: OpenAI Responses API with the `web_search` tool, JSON parsing, cleaning, and opening each public source page to check the email is on it (private and local addresses are never opened). |
 | `sheet-parser.ts` | Pure logic: finds the Name (or first/last name), Email, Batch Flag and tracking columns by header name, row numbers, New selection, validation, skip reasons, stale detection. |
 | `shared/template.ts` | Pure `{{variable}}` rendering, plain-text → HTML, escaping. Shared with the renderer for the live preview. |
 | `mailer.ts` | Provider-neutral `Mailer` interface and base class: throttling, safe retries, `SendResult`. |
@@ -107,6 +108,8 @@ and the row goes to manual review.
 | `config:get`, `config:save`, `config:import-service-account` | invoke | — / `saveConfigInputSchema` / — |
 | `google:test`, `google:init-columns`, `contacts:preview` | invoke | — / — / `previewInputSchema` |
 | `mailer:validate` | invoke | — |
+| `openai:validate` | invoke | — |
+| `finder:search`, `finder:save` | invoke | `finderSearchInputSchema` / `finderSaveInputSchema` |
 | `campaign:send-test`, `campaign:start`, `campaign:cancel`, `campaign:state`, `campaign:history` | invoke | `sendTestInputSchema` / `campaignStartInputSchema` / — |
 | `recovery:scan`, `recovery:apply`, `recovery:dismiss-review` | invoke | — / `recoveryApplyInputSchema` / `dismissReviewInputSchema` |
 | `logs:get`, `logs:clear`, `logs:open-folder` | invoke | — |

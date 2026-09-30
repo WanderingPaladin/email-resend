@@ -5,6 +5,7 @@ import { broadcast } from './ipc/handle';
 import { createElectronSettingsRepository, type SettingsRepository } from './repositories/settings.repository';
 import { CampaignService } from './services/campaign.service';
 import { ConfigService } from './services/config.service';
+import { ContactFinder } from './services/contact-finder.service';
 import { createSheetsClient, GoogleSheetsService } from './services/google-sheets.service';
 import { createFileJournal } from './services/journal.service';
 import { LoggerService } from './services/logger.service';
@@ -25,6 +26,7 @@ export interface AppContext {
   recovery: RecoveryService;
   createSheets(): GoogleSheetsService;
   createMailer(): Mailer;
+  createFinder(): ContactFinder;
 }
 
 export function createAppContext(): AppContext {
@@ -68,6 +70,11 @@ export function createAppContext(): AppContext {
     }
   };
 
+  const createFinder = (): ContactFinder => {
+    const { apiKey, model } = config.getOpenAiCredentials();
+    return new ContactFinder(apiKey, model, logger, chromiumFetch);
+  };
+
   const campaign = new CampaignService({
     logger,
     repo,
@@ -90,5 +97,5 @@ export function createAppContext(): AppContext {
     isCampaignRunning: () => campaign.isCampaignRunning(),
   });
 
-  return { logger, repo, config, campaign, recovery, createSheets, createMailer };
+  return { logger, repo, config, campaign, recovery, createSheets, createMailer, createFinder };
 }

@@ -13,6 +13,7 @@ export const LOG_FILTERS = [
   { id: 'campaign', label: 'Campaign' },
   { id: 'google', label: 'Google Sheets' },
   { id: 'resend', label: 'Email' },
+  { id: 'finder', label: 'Contact search' },
 ] as const;
 
 const LEVEL_TONE: Record<LogEntry['level'], Tone> = { debug: 'neutral', info: 'info', warn: 'warning', error: 'error' };
@@ -22,6 +23,7 @@ const CATEGORY_LABEL: Record<LogEntry['category'], string> = {
   google: 'Google Sheets',
   resend: 'Email',
   campaign: 'Campaign',
+  finder: 'Contact search',
   ipc: 'IPC',
 };
 

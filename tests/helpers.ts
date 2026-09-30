@@ -40,6 +40,8 @@ export class FakeSheetsGateway implements SheetsGateway {
   /** Grid width, like Google's columnCount. Writes beyond it fail as Google's do. */
   columnCount = 26;
   gridResizes = 0;
+  /** Other tabs created with addWorksheet, by title. */
+  tabs = new Map<string, string[][]>();
   /** Called before each read so tests can mutate the sheet mid-campaign. */
   beforeRead?: () => void;
 
@@ -68,7 +70,24 @@ export class FakeSheetsGateway implements SheetsGateway {
   }
 
   async getSpreadsheet() {
-    return { title: this.title, sheets: [{ title: this.worksheetName, rowCount: 1000 }] };
+    return {
+      title: this.title,
+      sheets: [this.worksheetName, ...this.tabs.keys()].map((title) => ({ title, rowCount: 1000 })),
+    };
+  }
+
+  async addWorksheet(_id: string, title: string): Promise<void> {
+    if (title === this.worksheetName || this.tabs.has(title)) {
+      throw Object.assign(new Error(`A sheet with the name "${title}" already exists.`), { response: { status: 400 } });
+    }
+    this.tabs.set(title, []);
+  }
+
+  async writeRows(_id: string, range: string, rows: string[][]): Promise<void> {
+    const { sheet, cell } = this.parse(range);
+    const tab = this.tabs.get(sheet);
+    if (!tab || cell?.col !== 0 || cell.row !== 1) throw new Error(`Unexpected writeRows range ${range}`);
+    tab.splice(0, tab.length, ...rows.map((r) => [...r]));
   }
 
   async ensureColumnCount(_id: string, worksheetName: string, minColumns: number): Promise<void> {

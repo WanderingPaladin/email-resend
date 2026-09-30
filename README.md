@@ -132,7 +132,30 @@ the send confirmation):
 | `message_id` | ID returned by the email provider (an existing `resend_email_id` column is used instead) |
 | `last_error` | Sanitized error message |
 
-Every other column (Location, Country, notes, …) is ignored and never changed.
+Every other column (Location, Country, notes, …) is ignored and never changed. **Test Google
+Sheets** also looks only at these columns: it shows which header it uses for the name, email and
+Batch Flag, which tracking columns exist, and how many New rows have (and don't have) an email.
+
+## Find Contacts (OpenAI web search)
+
+**Find Contacts** looks for people whose business email is published on a public web page and
+saves them to a new tab of your spreadsheet.
+
+1. In **Settings → OpenAI**, paste an OpenAI API key (stored encrypted) and, if you like, change the
+   model. Any OpenAI model that supports the `web_search` tool works. **Check OpenAI Key** tests the key
+   and model without searching.
+2. Describe who you are looking for (for example "HR managers at software companies in Austin") and
+   click **Search**. A search can take a minute or two and uses your OpenAI credits.
+3. The model is told to return only addresses written on a public page, never guessed ones. The app
+   then opens each source page and shows whether the email is really there (**On page**, **Not on
+   page**, **Not checked**). Only On-page results are pre-selected. Invalid emails, repeats and people
+   already in your Emails tab are left out.
+4. Pick a tab name and click **Save to New Tab**. The new tab has Name, Email, Organization, Role,
+   Source URL, Email on page, Batch Flag and the tracking columns. Existing tabs are never overwritten.
+
+Batch Flag is left **empty**, so nothing is sent to found contacts until you review them. Set Batch
+Flag to `New` only for people you are authorized to email, then either choose that tab as the
+worksheet in Settings or copy the rows into your Emails tab.
 
 ## Workflow
 

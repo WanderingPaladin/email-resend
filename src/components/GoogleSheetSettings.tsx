@@ -124,7 +124,16 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
         {message && <Alert tone={message.tone}>{message.text}</Alert>}
         {test && (
           <Alert tone="success" title="Connected successfully.">
-            {`Spreadsheet: ${test.spreadsheetTitle}\nWorksheet: ${test.worksheetName}\nRows: ${test.rowCount.toLocaleString()}\nNew: ${test.newCount.toLocaleString()}\nColumns used: ${test.columns.name} (name), ${test.columns.email} (email), ${test.columns.status} (status). Other columns are ignored.`}
+            {[
+              `Spreadsheet: ${test.spreadsheetTitle}`,
+              `Worksheet: ${test.worksheetName}`,
+              `Columns used: ${test.columns.name} (name), ${test.columns.email} (email), ${test.columns.status} (status)`,
+              `Tracking columns: ${test.trackingColumns.length > 0 ? test.trackingColumns.join(', ') : 'none yet'}`,
+              `Rows: ${test.rowCount.toLocaleString()}`,
+              `New with an email: ${test.newCount.toLocaleString()}`,
+              ...(test.newWithoutEmailCount > 0 ? [`New without an email (ignored): ${test.newWithoutEmailCount.toLocaleString()}`] : []),
+              'All other columns are ignored.',
+            ].join('\n')}
           </Alert>
         )}
         {test && test.missingTrackingColumns.length > 0 && (

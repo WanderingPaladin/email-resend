@@ -37,6 +37,11 @@ const api: EmailAppApi = {
     initializeTrackingColumns: () => invoke(IPC.googleInitColumns),
     previewContacts: (batchSize) => invoke(IPC.contactsPreview, { batchSize }),
   },
+  finder: {
+    validate: () => invoke(IPC.openaiValidate),
+    search: (input) => invoke(IPC.finderSearch, input),
+    save: (input) => invoke(IPC.finderSave, input),
+  },
   mailer: {
     validate: () => invoke(IPC.mailerValidate),
   },

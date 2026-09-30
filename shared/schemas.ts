@@ -3,11 +3,13 @@ import {
   DEFAULT_BATCH_SIZE,
   DEFAULT_CONCURRENCY,
   DEFAULT_FIRST_NAME_FALLBACK,
+  DEFAULT_OPENAI_MODEL,
   DEFAULT_SENDS_PER_SECOND,
   DEFAULT_WORKSHEET_NAME,
   EMAIL_PROVIDERS,
   MAX_BATCH_SIZE,
   MAX_CONCURRENCY,
+  MAX_FINDER_RESULTS,
   MAX_SENDS_PER_SECOND,
   MIN_BATCH_SIZE,
   MIN_CONCURRENCY,
@@ -47,6 +49,7 @@ export const settingsSchema = z.object({
     .max(MAX_SENDS_PER_SECOND)
     .default(DEFAULT_SENDS_PER_SECOND),
   firstNameFallback: trimmed(100).default(DEFAULT_FIRST_NAME_FALLBACK),
+  openaiModel: trimmed(100).min(1).default(DEFAULT_OPENAI_MODEL),
 });
 
 export type Settings = z.infer<typeof settingsSchema>;
@@ -76,8 +79,36 @@ export const saveConfigInputSchema = z.object({
   elasticEmailApiKey: secretInput,
   mailjetApiKey: secretInput,
   mailjetSecretKey: secretInput,
+  openaiApiKey: secretInput,
   googlePrivateKey: secretInput,
 });
+
+export const finderSearchInputSchema = z.object({
+  query: z.string().trim().min(3, 'Describe who to look for.').max(1000),
+  maxResults: z.number().int().min(1).max(MAX_FINDER_RESULTS).default(20),
+});
+export type FinderSearchInput = z.infer<typeof finderSearchInputSchema>;
+
+export const foundContactSchema = z.object({
+  name: z.string().trim().max(200),
+  email: z.string().trim().max(320),
+  organization: z.string().trim().max(300),
+  role: z.string().trim().max(300),
+  sourceUrl: z.string().trim().max(2000),
+  emailOnPage: z.enum(['yes', 'no', 'unknown']),
+});
+
+export const finderSaveInputSchema = z.object({
+  // Google Sheets does not allow these characters in tab names.
+  tabName: z
+    .string()
+    .trim()
+    .min(1, 'Enter a tab name.')
+    .max(100)
+    .refine((v) => !/[[\]*?:/\\]/.test(v), 'Tab names cannot contain [ ] * ? : / \\'),
+  contacts: z.array(foundContactSchema).min(1, 'Select at least one contact.').max(MAX_FINDER_RESULTS * 4),
+});
+export type FinderSaveInput = z.infer<typeof finderSaveInputSchema>;
 
 export type SaveConfigInput = z.infer<typeof saveConfigInputSchema>;
 

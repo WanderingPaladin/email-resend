@@ -4,7 +4,7 @@ import type { LogCategory, LogEntry, LogLevel } from '../../shared/types';
  * Pure helpers for log formatting and redaction. No Electron imports so they can be unit tested.
  */
 
-const LOG_CATEGORIES: readonly LogCategory[] = ['app', 'config', 'google', 'resend', 'campaign', 'ipc'];
+const LOG_CATEGORIES: readonly LogCategory[] = ['app', 'config', 'google', 'resend', 'campaign', 'finder', 'ipc'];
 const LOG_LEVELS: readonly LogLevel[] = ['debug', 'info', 'warn', 'error'];
 
 /** `maria@example.com` → `ma***@example.com`. Anything that is not an email is returned masked entirely. */
@@ -22,15 +22,18 @@ const EMAIL_PATTERN = /([A-Za-z0-9._%+-]+)@([A-Za-z0-9.-]+\.[A-Za-z]{2,})/g;
 const PEM_PATTERN = /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?(-----END [A-Z ]*PRIVATE KEY-----|$)/g;
 // Resend keys start with `re_`. Match generously so partial keys are also hidden.
 const RESEND_KEY_PATTERN = /\bre_[A-Za-z0-9_]{8,}\b/g;
+// OpenAI keys start with `sk-` (sk-proj-…, sk-svcacct-…).
+const OPENAI_KEY_PATTERN = /\bsk-[A-Za-z0-9_-]{16,}/g;
 const BEARER_PATTERN = /(Bearer\s+)[A-Za-z0-9._~+/=-]+/gi;
 
-const SECRET_KEY_NAMES = /^((resend|elastic_?email|mailjet)_?api_?key|(mailjet_?)?secret_?key|api_?key|private_?key|google_?private_?key|password|secret|token|authorization|access_?token|refresh_?token|client_?secret|credentials?)$/i;
+const SECRET_KEY_NAMES = /^((resend|elastic_?email|mailjet|open_?ai)_?api_?key|(mailjet_?)?secret_?key|api_?key|private_?key|google_?private_?key|password|secret|token|authorization|access_?token|refresh_?token|client_?secret|credentials?)$/i;
 
 /** Removes secrets (and optionally masks emails) from free text. */
 export function redactText(text: string, options: { maskEmails?: boolean } = {}): string {
   let out = text
     .replace(PEM_PATTERN, '[REDACTED PRIVATE KEY]')
     .replace(RESEND_KEY_PATTERN, '[REDACTED API KEY]')
+    .replace(OPENAI_KEY_PATTERN, '[REDACTED API KEY]')
     .replace(BEARER_PATTERN, '$1[REDACTED]');
   if (options.maskEmails !== false) {
     out = out.replace(EMAIL_PATTERN, (match) => maskEmail(match));
