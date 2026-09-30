@@ -18,6 +18,7 @@ const INPUT: CampaignStartInput = {
   batchSize: 100,
   concurrency: 5,
   dryRun: false,
+  initializeTrackingColumns: false,
 };
 
 function setup(rows: string[][]) {
@@ -60,7 +61,7 @@ const people: Record<string, string>[] = [
 ];
 
 describe('successful campaign', () => {
-  it('personalizes, sends and marks rows Sent in the status column only', async () => {
+  it('personalizes, sends and marks rows Sent with tracking data', async () => {
     const t = setup(sheetRows(people));
     t.client.script('maria@example.com', { id: 'f4ae7289-1' });
     const { summary, started } = await t.run();
@@ -72,11 +73,16 @@ describe('successful campaign', () => {
     expect(maria?.subject).toBe('Engineering Opportunity');
     expect(t.client.calls.find((c) => c.to === 'noname@example.com')?.text.startsWith('Hi there,')).toBe(true);
 
-    expect(t.gateway.rows[0]).toEqual(['first_name', 'last_name', 'email', 'tag', 'notes']);
-    expect(t.gateway.rowObject(2)).toEqual({ first_name: 'Maria', last_name: 'Lopez', email: 'maria@example.com', tag: 'Sent', notes: 'met at conf' });
-    // Every write targets column D (tag); nothing else in the sheet is touched.
-    expect(t.gateway.writeBatches.flat().every((w) => /!D\d+$/.test(w.range))).toBe(true);
-    expect(t.summaries.at(-1)?.results.find((r) => r.sheetRow === 2)?.resendId).toBe('f4ae7289-1');
+    const row = t.gateway.rowObject(2);
+    expect(row).toMatchObject({
+      tag: 'Sent',
+      send_status: 'sent',
+      campaign_id: started.campaignId,
+      message_id: 'f4ae7289-1',
+      last_error: '',
+    });
+    expect(new Date(row['sent_at'] ?? '').toISOString()).toBe(row['sent_at']);
+    expect(row['notes']).toBe('met at conf');
     expect(t.repo.get('campaignHistory')[0]).toMatchObject({ id: started.campaignId, sent: 3, total: 3 });
     expect(t.repo.get('activeCampaign')).toBeNull();
   });
@@ -90,14 +96,16 @@ describe('successful campaign', () => {
       seen.push(t.gateway.rowObject(rowIndex + 1));
       return original(payload, options);
     };
-    await t.run();
+    const { started } = await t.run();
     expect(seen).toHaveLength(3);
-    for (const row of seen) expect(row['tag']).toBe('Processing');
+    for (const row of seen) {
+      expect(row).toMatchObject({ tag: 'Processing', send_status: 'processing', campaign_id: started.campaignId });
+    }
   });
 
   it('updates the original sheet rows, not filtered positions', async () => {
     const rows = sheetRows([
-      { first_name: 'Old', email: 'old@example.com', tag: 'Sent' },
+      { first_name: 'Old', email: 'old@example.com', tag: 'Sent', message_id: 'x' },
       {},
       { first_name: 'Ana', email: 'ana@example.com', tag: 'New' },
       { first_name: 'Bo', email: 'bo@example.com', tag: 'Failed' },
@@ -110,6 +118,7 @@ describe('successful campaign', () => {
       ['cy@example.com', 6, 'sent'],
     ]);
     expect(t.gateway.rowObject(2)['tag']).toBe('Sent');
+    expect(t.gateway.rowObject(2)['message_id']).toBe('x');
     expect(t.gateway.rowObject(4)['tag']).toBe('Sent');
     expect(t.gateway.rowObject(5)['tag']).toBe('Failed');
     expect(t.gateway.rowObject(6)['tag']).toBe('Sent');
@@ -131,8 +140,8 @@ describe('failed sends', () => {
     t.client.script('carlos@example.com', { error: { name: 'validation_error', message: 'Invalid `to` field.', statusCode: 422 } });
     const { summary } = await t.run();
     expect(summary).toMatchObject({ sent: 2, failed: 1 });
-    expect(t.gateway.rowObject(3)['tag']).toBe('Failed');
-    expect(summary.results.find((r) => r.sheetRow === 3)?.error).toContain('Invalid `to` field.');
+    expect(t.gateway.rowObject(3)).toMatchObject({ tag: 'Failed', send_status: 'failed', message_id: '', sent_at: '' });
+    expect(t.gateway.rowObject(3)['last_error']).toContain('Invalid `to` field.');
     expect(t.gateway.rowObject(4)['tag']).toBe('Sent');
     expect(t.logger.lines.some((l) => l.level === 'error' && l.message.startsWith('Email failed'))).toBe(true);
   });
@@ -143,7 +152,7 @@ describe('failed sends', () => {
     t.client.script('maria@example.com', boom, boom, boom, boom);
     const { summary } = await t.run();
     expect(summary.needsReview).toBe(1);
-    expect(t.gateway.rowObject(2)['tag']).toBe('Processing');
+    expect(t.gateway.rowObject(2)).toMatchObject({ tag: 'Processing', send_status: 'review' });
     // Retries reused the idempotency key, so Resend cannot deliver twice.
     const keys = t.client.calls.filter((c) => c.to === 'maria@example.com').map((c) => c.idempotencyKey);
     expect(new Set(keys).size).toBe(1);
@@ -156,7 +165,7 @@ describe('failed sends', () => {
     expect(summary.abortReason).toMatch(/Campaign stopped/);
     expect(summary.sent).toBe(0);
     expect(t.client.calls).toHaveLength(1);
-    for (const row of [2, 3, 4]) expect(t.gateway.rowObject(row)['tag']).toBe('New');
+    for (const row of [2, 3, 4]) expect(t.gateway.rowObject(row)).toMatchObject({ tag: 'New', campaign_id: '', send_status: '' });
   });
 });
 
@@ -280,7 +289,7 @@ describe('cancellation', () => {
     expect(summary.notStarted).toBe(4);
     expect(t.gateway.rowObject(2)['tag']).toBe('Sent');
     expect(t.gateway.rowObject(3)['tag']).toBe('Sent');
-    for (const row of [4, 5, 6, 7]) expect(t.gateway.rowObject(row)['tag']).toBe('New');
+    for (const row of [4, 5, 6, 7]) expect(t.gateway.rowObject(row)).toMatchObject({ tag: 'New', campaign_id: '' });
   });
 });
 
@@ -297,7 +306,7 @@ describe('sheet update failure after the provider accepted the email', () => {
     const { summary, started } = await t.run();
 
     expect(summary.sent).toBe(1);
-    expect(t.gateway.rowObject(2)['tag']).toBe('Processing');
+    expect(t.gateway.rowObject(2)).toMatchObject({ tag: 'Processing', message_id: '' });
     const warning = t.logger.lines.find((l) => l.level === 'warn' && l.message.includes(EMAIL_SENT_SHEET_UPDATE_FAILED));
     expect(warning?.message).toContain('Email provider accepted email but Google Sheet status update failed. Manual review required.');
     expect(warning?.message).toContain('resendId=re-accepted-1');
@@ -313,16 +322,14 @@ describe('sheet update failure after the provider accepted the email', () => {
 
     // Recovery shows it as accepted and refuses to mark it New.
     const state = await t.recovery.scan();
-    expect(state.staleContacts).toEqual([
-      expect.objectContaining({ sheetRow: 2, campaignId: started.campaignId, journalOutcome: 'accepted', journalResendId: 're-accepted-1' }),
-    ]);
+    expect(state.staleContacts).toEqual([expect.objectContaining({ sheetRow: 2, journalOutcome: 'accepted', journalResendId: 're-accepted-1' })]);
     const refused = await t.recovery.apply({ action: 'mark_new', rows: [{ sheetRow: 2, email: 'maria@example.com' }] });
     expect(refused.updated).toBe(0);
     expect(t.gateway.rowObject(2)['tag']).toBe('Processing');
 
     const fixed = await t.recovery.apply({ action: 'mark_sent', rows: [{ sheetRow: 2, email: 'maria@example.com' }] });
     expect(fixed.updated).toBe(1);
-    expect(t.gateway.rowObject(2)['tag']).toBe('Sent');
+    expect(t.gateway.rowObject(2)).toMatchObject({ tag: 'Sent', send_status: 'sent', message_id: 're-accepted-1' });
     expect(t.repo.get('manualReview')).toHaveLength(0);
   });
 });
@@ -330,11 +337,19 @@ describe('sheet update failure after the provider accepted the email', () => {
 describe('sheet structure', () => {
   const minimal = [['First_Name', 'EMAIL', 'Tag'], ['Maria', 'maria@example.com', 'New']];
 
-  it('never adds columns: a sheet with only name, email and status works as is', async () => {
+  it('requires confirmation before adding tracking columns', async () => {
     const t = setup(minimal.map((r) => [...r]));
-    const { summary } = await t.run();
+    await expect(t.service.startCampaign(INPUT)).rejects.toThrow(/missing tracking columns/);
+    expect(t.client.calls).toHaveLength(0);
+    expect(t.service.isCampaignRunning()).toBe(false);
+  });
+
+  it('adds tracking columns after confirmation and then sends', async () => {
+    const t = setup(minimal.map((r) => [...r]));
+    const { summary } = await t.run({ initializeTrackingColumns: true });
     expect(summary.sent).toBe(1);
-    expect(t.gateway.rows).toEqual([['First_Name', 'EMAIL', 'Tag'], ['Maria', 'maria@example.com', 'Sent']]);
+    expect(t.gateway.rows[0]).toEqual(['First_Name', 'EMAIL', 'Tag', 'send_status', 'campaign_id', 'sent_at', 'message_id', 'last_error']);
+    expect(t.gateway.rowObject(2)).toMatchObject({ tag: 'Sent', send_status: 'sent' });
   });
 
   it('refuses to start when a required column is missing', async () => {
@@ -342,6 +357,23 @@ describe('sheet structure', () => {
     await expect(t.service.startCampaign(INPUT)).rejects.toThrow(/Batch Flag/);
     expect(t.client.calls).toHaveLength(0);
     expect(t.service.isCampaignRunning()).toBe(false);
+  });
+
+  it('ignores New rows without an email: nothing is sent and the row is not changed', async () => {
+    const t = setup(
+      sheetRows([
+        { first_name: 'Blank', email: '', tag: 'New' },
+        { first_name: 'Spaces', email: '   ', tag: 'New' },
+        { first_name: 'Maria', email: 'maria@example.com', tag: 'New' },
+      ]),
+    );
+    const { summary } = await t.run();
+    expect(t.client.calls.map((c) => c.to)).toEqual(['maria@example.com']);
+    expect(summary.results.map((r) => r.sheetRow)).toEqual([4]);
+    expect(t.gateway.rowObject(2)).toMatchObject({ tag: 'New', send_status: '', campaign_id: '' });
+    expect(t.gateway.rowObject(3)).toMatchObject({ tag: 'New', send_status: '', campaign_id: '' });
+    const preview = await t.service.previewContacts(100);
+    expect(preview).toMatchObject({ blankEmailCount: 2, totalNew: 0, skipped: [] });
   });
 
   it('follows a row that moved during the campaign', async () => {
@@ -362,7 +394,7 @@ describe('sheet structure', () => {
 describe('crash recovery', () => {
   it('detects stale Processing rows and never resends them automatically', async () => {
     const rows = sheetRows([
-      { first_name: 'A', email: 'a@example.com', tag: 'Processing' },
+      { first_name: 'A', email: 'a@example.com', tag: 'Processing', send_status: 'processing', campaign_id: '11111111-1111-1111-1111-111111111111' },
       { first_name: 'B', email: 'b@example.com', tag: 'New' },
     ]);
     const t = setup(rows);
@@ -381,7 +413,7 @@ describe('crash recovery', () => {
   });
 
   it('refuses recovery actions on rows whose email no longer matches', async () => {
-    const t = setup(sheetRows([{ first_name: 'A', email: 'a@example.com', tag: 'Processing' }]));
+    const t = setup(sheetRows([{ first_name: 'A', email: 'a@example.com', tag: 'Processing', send_status: 'processing' }]));
     const result = await t.recovery.apply({ action: 'mark_new', rows: [{ sheetRow: 2, email: 'other@example.com' }] });
     expect(result.updated).toBe(0);
     expect(t.gateway.rowObject(2)['tag']).toBe('Processing');

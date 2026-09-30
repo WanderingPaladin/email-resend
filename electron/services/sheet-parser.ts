@@ -1,4 +1,4 @@
-import { MAX_BATCH_SIZE, TAG } from '../../shared/constants';
+import { MAX_BATCH_SIZE, SEND_STATUS, TAG, TRACKING_COLUMNS, type TrackingColumn } from '../../shared/constants';
 import { emailSchema } from '../../shared/schemas';
 import type { ContactRow, SkippedContact } from '../../shared/types';
 
@@ -6,8 +6,9 @@ import type { ContactRow, SkippedContact } from '../../shared/types';
  * Pure spreadsheet parsing and contact-selection logic.
  * Kept free of Google/Electron imports so every rule can be unit tested.
  *
- * Only three things are read from the sheet: a name (Name, or first_name/last_name),
- * the email address, and the status column (Batch Flag, or tag). All other columns are ignored.
+ * Contacts are read from three things: a name (Name, or first_name/last_name), the email
+ * address, and the status column (Batch Flag, or tag). The app's own tracking columns are read
+ * too. All other columns are ignored.
  */
 
 export type HeaderMap = Map<string, number>;
@@ -25,12 +26,22 @@ export const COLUMN_NAMES = {
   fullName: ['name', 'full name', 'fullname'],
 } as const;
 
+/** Accepted header names per tracking column (normalized). */
+const TRACKING_NAMES: Record<TrackingColumn, readonly string[]> = {
+  send_status: ['send status'],
+  campaign_id: ['campaign id'],
+  sent_at: ['sent at'],
+  message_id: ['message id', 'resend email id'],
+  last_error: ['last error'],
+};
+
 export interface SheetColumns {
   status?: number;
   email?: number;
   firstName?: number;
   lastName?: number;
   fullName?: number;
+  tracking: Partial<Record<TrackingColumn, number>>;
 }
 
 /** Maps normalized header name → zero-based column index. The first occurrence wins. */
@@ -51,7 +62,14 @@ export function resolveColumns(headers: HeaderMap): SheetColumns {
     firstName: find(COLUMN_NAMES.firstName),
     lastName: find(COLUMN_NAMES.lastName),
     fullName: find(COLUMN_NAMES.fullName),
+    tracking: Object.fromEntries(
+      TRACKING_COLUMNS.map((c) => [c, find(TRACKING_NAMES[c])]).filter(([, i]) => i !== undefined),
+    ) as Partial<Record<TrackingColumn, number>>,
   };
+}
+
+export function missingTrackingColumns(columns: SheetColumns): TrackingColumn[] {
+  return TRACKING_COLUMNS.filter((c) => columns.tracking[c] === undefined);
 }
 
 /** Header text of each column in use, for display. */
@@ -105,7 +123,7 @@ export function parseContacts(values: readonly (readonly unknown[])[]): {
 } {
   const headers = buildHeaderMap(values[0] ?? []);
   const columns = resolveColumns(headers);
-  const used = [columns.status, columns.email, columns.firstName, columns.lastName, columns.fullName];
+  const used = [columns.status, columns.email, columns.firstName, columns.lastName, columns.fullName, ...Object.values(columns.tracking)];
   const contacts: ContactRow[] = [];
   for (let i = 1; i < values.length; i++) {
     const row = values[i] ?? [];
@@ -123,6 +141,11 @@ export function parseContacts(values: readonly (readonly unknown[])[]): {
       lastName,
       email: cell(row, columns.email),
       tag: cell(row, columns.status),
+      sendStatus: cell(row, columns.tracking.send_status),
+      campaignId: cell(row, columns.tracking.campaign_id),
+      sentAt: cell(row, columns.tracking.sent_at),
+      messageId: cell(row, columns.tracking.message_id),
+      lastError: cell(row, columns.tracking.last_error),
     });
   }
   return { headers, columns, contacts };
@@ -136,14 +159,23 @@ export function isValidEmail(email: string): boolean {
   return emailSchema.safeParse(email.trim()).success;
 }
 
-/** True when the row's status shows a previous successful send. */
+/** True when the row shows any sign of a previous successful send. */
 export function looksAlreadySent(contact: ContactRow): boolean {
-  return contact.tag.trim().toLowerCase() === TAG.Sent.toLowerCase();
+  return (
+    contact.tag.trim().toLowerCase() === TAG.Sent.toLowerCase() ||
+    contact.sendStatus.trim().toLowerCase() === SEND_STATUS.Sent ||
+    contact.messageId.trim() !== ''
+  );
 }
 
 /** Reserved by a campaign that never finished with it (crash, unknown delivery, failed sheet write). */
 export function isStaleProcessing(contact: ContactRow): boolean {
-  return contact.tag.trim().toLowerCase() === TAG.Processing.toLowerCase();
+  const status = contact.sendStatus.trim().toLowerCase();
+  return (
+    contact.tag.trim().toLowerCase() === TAG.Processing.toLowerCase() ||
+    status === SEND_STATUS.Processing ||
+    status === SEND_STATUS.Review
+  );
 }
 
 export function findStaleProcessing(contacts: readonly ContactRow[]): ContactRow[] {
@@ -156,14 +188,18 @@ export function clampBatchSize(requested: number): number {
 }
 
 export interface SelectionResult {
+  /** New rows that have an email address. */
   totalNew: number;
+  /** New rows with an empty email cell. They are ignored entirely: never sent, never written. */
+  blankEmailCount: number;
   selected: ContactRow[];
   skipped: SkippedContact[];
 }
 
 /**
  * Walks New contacts in sheet order and picks up to `batchSize` eligible ones.
- * Ineligible New contacts seen along the way are reported as skipped.
+ * New rows with an empty email are ignored (only counted). Other ineligible New contacts seen
+ * along the way are reported as skipped.
  * The batch size is clamped to MAX_BATCH_SIZE here, so no caller can exceed it.
  * `pendingSentEmails` are addresses the provider accepted but whose row could not be marked
  * Sent (kept locally for manual review); they are never emailed again automatically.
@@ -174,7 +210,8 @@ export function selectContacts(
   pendingSentEmails: ReadonlySet<string> = new Set(),
 ): SelectionResult {
   const batchSize = clampBatchSize(requestedBatchSize);
-  const newContacts = contacts.filter((c) => isNewTag(c.tag));
+  const newRows = contacts.filter((c) => isNewTag(c.tag));
+  const newContacts = newRows.filter((c) => c.email.trim() !== '');
 
   // Emails that already received a message from any row are never emailed again automatically.
   const alreadySentRows = new Map<string, number>();
@@ -197,10 +234,10 @@ export function selectContacts(
     const email = contact.email.trim();
     const key = email.toLowerCase();
 
-    if (!email) {
-      skip(contact, 'blank_email', 'Email is blank');
-    } else if (!isValidEmail(email)) {
+    if (!isValidEmail(email)) {
       skip(contact, 'invalid_email', 'Email address is not valid');
+    } else if (contact.messageId.trim() || contact.sendStatus.trim().toLowerCase() === SEND_STATUS.Sent) {
+      skip(contact, 'already_sent', 'Row already has a successful send recorded');
     } else if (pendingSentEmails.has(key)) {
       skip(contact, 'already_sent', 'An earlier campaign already sent this email but could not mark the row Sent (see Review)');
     } else if (seen.has(key)) {
@@ -213,7 +250,7 @@ export function selectContacts(
     }
   }
 
-  return { totalNew: newContacts.length, selected, skipped };
+  return { totalNew: newContacts.length, blankEmailCount: newRows.length - newContacts.length, selected, skipped };
 }
 
 /** 0 → A, 25 → Z, 26 → AA. */

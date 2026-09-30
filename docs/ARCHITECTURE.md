@@ -35,8 +35,8 @@ Main process (electron/)         Zod-validated IPC handlers → services
 | File | Responsibility |
 | --- | --- |
 | `config.service.ts` | Settings (electron-store) + encrypted secrets. |
-| `google-sheets.service.ts` | Connection test, reading/parsing the sheet, verified status (Batch Flag) updates. |
-| `sheet-parser.ts` | Pure logic: finds the Name (or first/last name), Email and Batch Flag columns by header name, row numbers, New selection, validation, skip reasons, stale detection. |
+| `google-sheets.service.ts` | Connection test, reading/parsing the sheet, tracking-column initialization (widening the grid first), verified row updates. |
+| `sheet-parser.ts` | Pure logic: finds the Name (or first/last name), Email, Batch Flag and tracking columns by header name, row numbers, New selection, validation, skip reasons, stale detection. |
 | `shared/template.ts` | Pure `{{variable}}` rendering, plain-text → HTML, escaping. Shared with the renderer for the live preview. |
 | `mailer.ts` | Provider-neutral `Mailer` interface and base class: throttling, safe retries, `SendResult`. |
 | `resend.service.ts`, `elastic-email.service.ts`, `mailjet.service.ts` | One request per provider, error classification (fatal / ambiguous / retryable), key validation without sending. |
@@ -52,17 +52,18 @@ startCampaign()
   ├─ lock (synchronous, before any await)       → "A campaign is already running."
   ├─ validate template variables
   ├─ read sheet once, parse headers by name
-  ├─ selectContacts(): Batch Flag = New, valid email, not awaiting manual review,
-  │                    no duplicate email, max 100
-  ├─ reserve all selected rows in ONE batch write: Batch Flag=Processing
+  ├─ ensure tracking columns (only with operator confirmation)
+  ├─ selectContacts(): Batch Flag = New, email not empty (empty rows are ignored), valid email,
+  │                    no previous send, not awaiting manual review, no duplicate email, max 100
+  ├─ reserve all selected rows in ONE batch write: Batch Flag=Processing, send_status=processing, campaign_id
   │    (each row re-verified against a fresh read: still New, same email)
   └─ run in background with p-limit(concurrency)
         for each contact:
           cancelled / fatal error? → not started (returned to New at the end)
           render → provider (Resend gets idempotency key = campaignId:row) → journal the outcome
-          ├─ accepted  → queue: Batch Flag=Sent
-          ├─ rejected  → queue: Batch Flag=Failed (reason in results and logs)
-          ├─ unknown   → Batch Flag stays Processing (manual review)
+          ├─ accepted  → queue: Batch Flag=Sent, send_status=sent, sent_at, message_id, last_error=""
+          ├─ rejected  → queue: Batch Flag=Failed, send_status=failed, last_error
+          ├─ unknown   → queue: Batch Flag stays Processing, send_status=review (manual review)
           └─ fatal (bad key, quota, sender domain) → stop scheduling
         queued updates are flushed every 3 s / 25 rows as one verified batch write
         flush failed for an accepted email → EMAIL_SENT_SHEET_UPDATE_FAILED (warn + manual-review list)
@@ -81,8 +82,8 @@ and the local journal lets the Review screen show that the provider accepted it.
 
 Row numbers are the source of truth for updates, but someone may insert, delete or sort rows
 while a campaign runs. Before each batch write the sheet is re-read and each update is applied
-only if the row at the recorded number still has the same email and expected Batch Flag. If the row
-moved, it is re-located by email + Batch Flag; if that is ambiguous, the update is not written
+only if the row at the recorded number still has the same email (and campaign ID). If the row
+moved, it is re-located by email + campaign ID; if that is ambiguous, the update is not written
 and the row goes to manual review.
 
 ## Duplicate-send protection summary
@@ -90,8 +91,8 @@ and the row goes to manual review.
 1. Single app instance (`app.requestSingleInstanceLock()`).
 2. One campaign at a time (in-memory lock, taken synchronously).
 3. Contacts are reserved in the sheet before any send.
-4. Only `New` rows are selected; an email already `Sent` in another row, or accepted but still
-   awaiting manual review, is skipped.
+4. Rows with Batch Flag `Sent`, `send_status = sent` or a `message_id` are never selected; an email
+   already sent from another row, or accepted but still awaiting manual review, is skipped.
 5. Resend idempotency keys (`campaignId:row`) make retries of the same request safe. Elastic Email and
    Mailjet have no such key, so only rate-limit errors are retried there.
 6. Ambiguous outcomes (network failure, 5xx) are never retried without that key and end in manual review.
@@ -104,7 +105,7 @@ and the row goes to manual review.
 | --- | --- | --- |
 | `app:status`, `app:copy-text` | invoke | — / `copyTextInputSchema` |
 | `config:get`, `config:save`, `config:import-service-account` | invoke | — / `saveConfigInputSchema` / — |
-| `google:test`, `contacts:preview` | invoke | — / `previewInputSchema` |
+| `google:test`, `google:init-columns`, `contacts:preview` | invoke | — / — / `previewInputSchema` |
 | `mailer:validate` | invoke | — |
 | `campaign:send-test`, `campaign:start`, `campaign:cancel`, `campaign:state`, `campaign:history` | invoke | `sendTestInputSchema` / `campaignStartInputSchema` / — |
 | `recovery:scan`, `recovery:apply`, `recovery:dismiss-review` | invoke | — / `recoveryApplyInputSchema` / `dismissReviewInputSchema` |

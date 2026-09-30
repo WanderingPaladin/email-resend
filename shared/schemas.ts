@@ -101,6 +101,8 @@ export const campaignStartInputSchema = emailContentSchema.extend({
   batchSize: z.number().int().min(MIN_BATCH_SIZE).max(MAX_BATCH_SIZE),
   concurrency: z.number().int().min(MIN_CONCURRENCY).max(MAX_CONCURRENCY),
   dryRun: z.boolean(),
+  /** Operator confirmed that missing tracking columns may be appended to the header row. */
+  initializeTrackingColumns: z.boolean().default(false),
 });
 
 export type CampaignStartInput = z.infer<typeof campaignStartInputSchema>;

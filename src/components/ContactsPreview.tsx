@@ -2,7 +2,6 @@ import type { PreviewResult, SkippedContact } from '@shared/types';
 import { Alert, Badge } from '@/components/ui/badge';
 
 const SKIP_LABELS: Record<SkippedContact['reason'], string> = {
-  blank_email: 'Blank email',
   invalid_email: 'Invalid email',
   already_sent: 'Already sent',
   duplicate_in_campaign: 'Duplicate',
@@ -28,6 +27,11 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
           </div>
         )}
       </div>
+      {preview.blankEmailCount > 0 && (
+        <p className="text-xs text-slate-500">
+          {preview.blankEmailCount} New row(s) have no email address and are ignored. Nothing is sent to them and they are not changed.
+        </p>
+      )}
       {preview.staleProcessingCount > 0 && (
         <Alert tone="warning">
           {preview.staleProcessingCount} row(s) are still in Processing from an earlier campaign. They are excluded and need review.
@@ -61,7 +65,7 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
                 <td className="px-3 py-1.5 tabular-nums">{s.sheetRow}</td>
                 <td className="px-3 py-1.5">{s.firstName}</td>
                 <td className="px-3 py-1.5" />
-                <td className="px-3 py-1.5">{s.email || '(blank)'}</td>
+                <td className="px-3 py-1.5">{s.email}</td>
                 <td className="px-3 py-1.5">
                   <Badge tone="warning">Skipped: {SKIP_LABELS[s.reason]}</Badge>
                 </td>

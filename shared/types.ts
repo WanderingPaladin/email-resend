@@ -40,10 +40,15 @@ export interface ContactRow {
   email: string;
   /** Batch Flag (or tag) value. */
   tag: string;
+  /** Tracking columns ('' when the column does not exist yet). */
+  sendStatus: string;
+  campaignId: string;
+  sentAt: string;
+  messageId: string;
+  lastError: string;
 }
 
 export type SkipReason =
-  | 'blank_email'
   | 'invalid_email'
   | 'already_sent'
   | 'duplicate_in_campaign'
@@ -71,6 +76,9 @@ export interface PreviewResult {
   selected: ContactPreview[];
   skipped: SkippedContact[];
   batchSize: number;
+  /** New rows ignored because their email cell is empty. They are never emailed or listed as skipped. */
+  blankEmailCount: number;
+  missingTrackingColumns: string[];
   staleProcessingCount: number;
 }
 
@@ -87,6 +95,7 @@ export interface GoogleTestResult {
   headers: string[];
   /** Which sheet columns are used, e.g. { name: 'Name', email: 'Email', status: 'Batch Flag' }. */
   columns: { name: string; email: string; status: string };
+  missingTrackingColumns: string[];
 }
 
 export interface MailerValidationResult {
@@ -188,7 +197,9 @@ export interface StaleContact {
   email: string;
   firstName: string;
   tag: string;
-  /** Campaign that reserved the row, found in the local journal ('' if unknown). */
+  sendStatus: string;
+  lastError: string;
+  /** Campaign that reserved the row: the campaign_id cell, or the local journal ('' if unknown). */
   campaignId: string;
   /** Message ID recorded in the local journal, if the provider accepted this email. */
   journalResendId: string;

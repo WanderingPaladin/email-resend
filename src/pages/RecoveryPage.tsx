@@ -117,6 +117,7 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
                   <th className="px-3 py-2 font-medium">Status</th>
                   <th className="px-3 py-2 font-medium">Local record</th>
                   <th className="px-3 py-2 font-medium">Message ID</th>
+                  <th className="px-3 py-2 font-medium">Last error</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -127,9 +128,12 @@ export function RecoveryPage({ recovery }: { recovery: RecoveryHook }) {
                     </td>
                     <td className="px-3 py-1.5 tabular-nums">{c.sheetRow}</td>
                     <td className="px-3 py-1.5">{c.email}</td>
-                    <td className="px-3 py-1.5">{c.tag}</td>
+                    <td className="px-3 py-1.5">
+                      {c.tag} / {c.sendStatus || '—'}
+                    </td>
                     <td className="px-3 py-1.5">{outcomeBadge(c)}</td>
                     <td className="px-3 py-1.5 font-mono">{c.journalResendId}</td>
+                    <td className="max-w-xs px-3 py-1.5 text-slate-600">{c.lastError}</td>
                   </tr>
                 ))}
               </tbody>

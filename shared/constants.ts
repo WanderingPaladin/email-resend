@@ -36,11 +36,28 @@ export const TAG = {
   Failed: 'Failed',
 } as const;
 
+/** Values written to the `send_status` tracking column. */
+export const SEND_STATUS = {
+  Processing: 'processing',
+  Sent: 'sent',
+  Failed: 'failed',
+  /** The provider may or may not have accepted the email. Never retried automatically. */
+  Review: 'review',
+} as const;
+
 /**
- * The only columns the app reads: a name (Name, or first_name/last_name), Email, and the
- * status column (Batch Flag, or tag). Every other column is ignored and never written.
+ * Contact columns the app reads: a name (Name, or first_name/last_name), Email, and the
+ * status column (Batch Flag, or tag). Other columns are ignored and never written.
  */
 export const REQUIRED_COLUMNS = ['first_name', 'email', 'tag'] as const;
+
+/**
+ * Columns the app writes while tracking a campaign, appended to the right of the headers with
+ * the operator's confirmation. Sheets from older versions may have `resend_email_id` instead of
+ * `message_id`; it is used as is.
+ */
+export const TRACKING_COLUMNS = ['send_status', 'campaign_id', 'sent_at', 'message_id', 'last_error'] as const;
+export type TrackingColumn = (typeof TRACKING_COLUMNS)[number];
 
 /** Template variables supported in subject and body. */
 export const TEMPLATE_VARIABLES = ['first_name', 'last_name', 'email'] as const;
@@ -78,6 +95,7 @@ export const IPC = {
   configImportServiceAccount: 'config:import-service-account',
 
   googleTest: 'google:test',
+  googleInitColumns: 'google:init-columns',
   contactsPreview: 'contacts:preview',
 
   mailerValidate: 'mailer:validate',

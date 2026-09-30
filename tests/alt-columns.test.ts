@@ -29,7 +29,7 @@ describe('Name / Batch Flag layout', () => {
     expect(splitFullName('')).toEqual({ firstName: '', lastName: '' });
   });
 
-  it('treats Batch Flag as the status column and Name as the first-name source', () => {
+  it('treats Batch Flag as the tag column and Name as the first-name source', () => {
     const headers = buildHeaderMap(HEADERS);
     expect(resolveColumns(headers)).toMatchObject({ status: 9, email: 1, fullName: 0 });
     expect(missingRequiredColumns(headers)).toEqual([]);
@@ -52,6 +52,8 @@ describe('Name / Batch Flag layout', () => {
 
   it('runs a campaign that personalizes from Name and writes status to Batch Flag', async () => {
     const h = createHarness([[...HEADERS], row('Maria Lopez', 'maria@example.com', 'New'), row('', 'noname@example.com', 'New')]);
+    // The grid is exactly as wide as the headers (10 columns), like a copied sheet.
+    h.gateway.columnCount = 10;
     const summaries: unknown[] = [];
     const service = new CampaignService({
       logger: h.logger,
@@ -72,14 +74,18 @@ describe('Name / Batch Flag layout', () => {
       batchSize: 100,
       concurrency: 2,
       dryRun: false,
+      initializeTrackingColumns: true,
     });
     await service.whenIdle();
 
     expect(h.client.calls.find((c) => c.to === 'maria@example.com')?.text.startsWith('Hi Maria,')).toBe(true);
     expect(h.client.calls.find((c) => c.to === 'noname@example.com')?.subject).toBe('Hi there');
-    // Status goes to Batch Flag; no columns are added and every other column is untouched.
-    expect(h.gateway.rows[0]).toEqual(HEADERS);
-    expect(h.gateway.rows[1]).toEqual(row('Maria Lopez', 'maria@example.com', 'Sent'));
-    expect(h.gateway.rows[2]).toEqual(row('', 'noname@example.com', 'Sent'));
+    // Status goes to Batch Flag; tracking columns are appended after it; other columns untouched.
+    expect(h.gateway.rows[0]?.slice(0, 10)).toEqual(HEADERS);
+    expect(h.gateway.rows[0]?.slice(10)).toEqual(['send_status', 'campaign_id', 'sent_at', 'message_id', 'last_error']);
+    expect(h.gateway.rowObject(2)).toMatchObject({ 'batch flag': 'Sent', send_status: 'sent', name: 'Maria Lopez', country: 'Peru' });
+    expect(h.gateway.rowObject(2)['tag']).toBeUndefined();
+    expect(h.gateway.columnCount).toBe(15);
+    expect(h.gateway.gridResizes).toBe(1);
   });
 });

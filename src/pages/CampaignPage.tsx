@@ -118,6 +118,7 @@ export function CampaignPage({
         batchSize: clamp(form.batchSize, MIN_BATCH_SIZE, MAX_BATCH_SIZE),
         concurrency: clamp(form.concurrency, MIN_CONCURRENCY, MAX_CONCURRENCY),
         dryRun: form.dryRun,
+        initializeTrackingColumns: (preview?.missingTrackingColumns.length ?? 0) > 0,
       });
       setConfirmOpen(false);
       setStartNotice({ tone: 'info', text: `Campaign ${result.campaignId} started with ${result.selected} contact(s).` });
@@ -330,6 +331,7 @@ export function CampaignPage({
         subject={form.subject}
         concurrency={clamp(form.concurrency, MIN_CONCURRENCY, MAX_CONCURRENCY)}
         dryRun={form.dryRun}
+        missingTrackingColumns={preview?.missingTrackingColumns ?? []}
         starting={starting}
         onCancel={() => setConfirmOpen(false)}
         onConfirm={() => void start()}

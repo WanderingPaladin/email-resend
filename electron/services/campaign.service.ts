@@ -24,7 +24,14 @@ import type {
 } from '../../shared/types';
 import type { SettingsRepository } from '../repositories/settings.repository';
 import type { AppLogger } from '../types/logger';
-import { failedUpdate, releaseUpdate, sentUpdate, type GoogleSheetsService, type RowUpdate } from './google-sheets.service';
+import {
+  failedUpdate,
+  releaseUpdate,
+  reviewUpdate,
+  sentUpdate,
+  type GoogleSheetsService,
+  type RowUpdate,
+} from './google-sheets.service';
 import type { CampaignJournal } from './journal.service';
 import { maskEmail } from './log-format';
 import type { Mailer } from './mailer';
@@ -74,7 +81,7 @@ interface RunContext {
   writer: StatusWriter | null;
 }
 
-type WriteKind = 'sent' | 'failed';
+type WriteKind = 'sent' | 'failed' | 'review';
 
 interface QueuedWrite {
   update: RowUpdate;
@@ -139,10 +146,10 @@ class StatusWriter {
  * Orchestrates campaigns: contact selection, reservation, rendering, sending, status updates,
  * progress events and history. Duplicate-send protection lives here:
  * - one campaign at a time (in-memory lock taken synchronously, before any await)
- * - contacts are reserved (Batch Flag = Processing) in the sheet before any email is sent
- * - only New rows are selected; emails still awaiting manual review are never selected
+ * - contacts are reserved (Batch Flag = Processing, campaign_id) in the sheet before any email is sent
+ * - rows with any sign of a previous send are never selected, nor emails awaiting manual review
  * - retries happen only when they cannot duplicate (rate limits, or provider idempotency keys)
- * - ambiguous outcomes stay in Processing for manual review instead of being retried
+ * - ambiguous outcomes are parked for manual review (send_status = review) instead of retried
  */
 export class CampaignService {
   private running = false;
@@ -198,6 +205,8 @@ export class CampaignService {
         tag: c.tag,
       })),
       skipped: selection.skipped,
+      blankEmailCount: selection.blankEmailCount,
+      missingTrackingColumns: snapshot.missingTrackingColumns,
       staleProcessingCount: findStaleProcessing(snapshot.contacts).length,
     };
   }
@@ -304,8 +313,21 @@ export class CampaignService {
       });
     }
 
-    const snapshot = await sheets.readSheet();
+    let snapshot = await sheets.readSheet();
+    if (snapshot.missingTrackingColumns.length > 0 && !input.dryRun) {
+      if (!input.initializeTrackingColumns) {
+        throw new Error(
+          `The sheet is missing tracking columns: ${snapshot.missingTrackingColumns.join(', ')}. Confirm that they may be added and try again.`,
+        );
+      }
+      await sheets.initializeTrackingColumns();
+      snapshot = await sheets.readSheet();
+    }
+
     const selection = selectContacts(snapshot.contacts, batchSize, this.pendingSentEmails());
+    if (selection.blankEmailCount > 0) {
+      logger.info('campaign', `Ignored ${selection.blankEmailCount} New row(s) with no email address`);
+    }
     logger.info('campaign', `Found ${selection.totalNew} New contacts`);
     for (const s of selection.skipped) {
       logger.info('campaign', 'Skipped contact', { row: s.sheetRow, email: maskEmail(s.email), reason: s.detail });
@@ -322,7 +344,7 @@ export class CampaignService {
     if (!input.dryRun) {
       this.deps.repo.set('activeCampaign', { campaignId, startedAt });
       this.deps.journal.record({ ts: startedAt, campaignId, event: 'campaign_started' });
-      const failures = await sheets.reserveContacts(contacts);
+      const failures = await sheets.reserveContacts(contacts, campaignId);
       if (failures.length > 0) {
         const failedRows = new Set(failures.map((f) => f.update.sheetRow));
         for (const f of failures) {
@@ -427,7 +449,7 @@ export class CampaignService {
     // Contacts reserved but never started go back to New: they were definitely not emailed.
     const notStarted = prepared.contacts.filter((c) => results.get(c.sheetRow)?.status === 'not_started');
     if (notStarted.length > 0 && !input.dryRun && prepared.sheets) {
-      const failures = await prepared.sheets.applyRowUpdates(notStarted.map((c) => releaseUpdate(c)));
+      const failures = await prepared.sheets.applyRowUpdates(notStarted.map((c) => releaseUpdate(c, campaignId)));
       logger.info('campaign', `Returned ${notStarted.length - failures.length} unstarted contact(s) to New`);
       for (const f of failures) {
         logger.warn('campaign', 'Could not return unstarted contact to New; it remains in Processing for review', {
@@ -514,7 +536,7 @@ export class CampaignService {
       logger.info('campaign', 'Email sent', { row: contact.sheetRow, email: masked, resendId: result.id });
       setResult('sent', result.id);
       ctx.progress.sent++;
-      ctx.writer?.enqueue({ update: sentUpdate(contact), kind: 'sent', resendId: result.id });
+      ctx.writer?.enqueue({ update: sentUpdate(contact, campaignId, result.id, ts), kind: 'sent', resendId: result.id });
     } else if (result.ambiguous) {
       this.deps.journal.record({
         ts,
@@ -530,9 +552,9 @@ export class CampaignService {
         email: masked,
         reason: result.error,
       });
-      // The row keeps Batch Flag = Processing, which the Review screen lists.
       setResult('needs_review', '', result.error);
       ctx.progress.needsReview++;
+      ctx.writer?.enqueue({ update: reviewUpdate(contact, campaignId, result.error), kind: 'review', resendId: '' });
     } else if (result.fatal) {
       this.deps.journal.record({
         ts,
@@ -565,7 +587,7 @@ export class CampaignService {
       logger.error('campaign', 'Email failed', { row: contact.sheetRow, email: masked, reason: result.error });
       setResult('failed', '', result.error);
       ctx.progress.failed++;
-      ctx.writer?.enqueue({ update: failedUpdate(contact), kind: 'failed', resendId: '' });
+      ctx.writer?.enqueue({ update: failedUpdate(contact, campaignId, result.error), kind: 'failed', resendId: '' });
     }
 
     ctx.progress.processed++;

@@ -111,17 +111,28 @@ Only one provider is used at a time; switching keeps the other providers' keys s
 
 ## Google Sheet format
 
-Row 1 must contain headers. The app reads only three things, matched by header name
+Row 1 must contain headers. Contacts are read from three columns, matched by header name
 (case-insensitive; `_`, `-` and spaces are treated alike), in any order:
 
 | What | Header | Notes |
 | --- | --- | --- |
 | Name | `Name` (full name), or `first_name` / `last_name` | With `Name`, the first word becomes `{{first_name}}` and the rest `{{last_name}}` ("Lopez, Maria" is also understood). Empty names use the fallback (default `there`) |
-| Email | `Email` | Invalid or blank emails are skipped |
+| Email | `Email` | Rows with an empty email are ignored completely: never emailed, never changed. Invalid emails are skipped |
 | Status | `Batch Flag` (or `tag`) | The app sends to `New` rows and writes `Processing`, then `Sent` or `Failed` |
 
-Every other column (Location, Country, notes, …) is ignored and never changed. The app never adds
-columns: the Batch Flag cell is the only cell it writes.
+The app also records each send in five tracking columns. If they are missing, it offers to add
+them to the right of your existing headers (Settings → Test Google Sheets → Add Columns, or in
+the send confirmation):
+
+| Column | Written by the app |
+| --- | --- |
+| `send_status` | `processing`, `sent`, `failed`, `review` |
+| `campaign_id` | ID of the campaign that processed the row |
+| `sent_at` | ISO timestamp |
+| `message_id` | ID returned by the email provider (an existing `resend_email_id` column is used instead) |
+| `last_error` | Sanitized error message |
+
+Every other column (Location, Country, notes, …) is ignored and never changed.
 
 ## Workflow
 
@@ -142,11 +153,11 @@ columns: the Batch Flag cell is the only cell it writes.
 
 ## If something goes wrong
 
-- **A contact fails**: its row becomes `Failed`; the reason is in the results table and Logs. The campaign continues.
+- **A contact fails**: its row becomes `Failed` with `last_error`; the campaign continues.
 - **Invalid API key, quota exhausted or unverified sender**: the campaign stops early and
   unstarted contacts go back to `New`.
 - **Network error while sending**: the provider may or may not have delivered it. The row stays in
-  `Processing` and is never resent automatically.
+  `Processing` with `send_status = review` and is never resent automatically.
 - **App closed or crashed mid-campaign**: rows left in `Processing` are listed on the **Review**
   screen at the next launch. Choose **Mark as New**, **Mark as Failed** or **Mark as Sent** for each.
   Nothing on that screen sends email, and **Mark as New** is refused for rows the app knows the provider accepted.

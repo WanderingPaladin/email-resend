@@ -1,19 +1,24 @@
 import { google } from 'googleapis';
-import { TAG } from '../../shared/constants';
+import { SEND_STATUS, TAG, type TrackingColumn } from '../../shared/constants';
 import type { ContactRow, GoogleTestResult } from '../../shared/types';
 import type { AppLogger } from '../types/logger';
 import type { GoogleCredentials } from './config.service';
 import { maskEmail } from './log-format';
 import { withRetry } from './retry';
 import {
+  buildHeaderMap,
   cellRange,
   describeColumns,
   findStaleProcessing,
   isNewTag,
   isStaleProcessing,
+  looksAlreadySent,
   missingRequiredColumns,
+  missingTrackingColumns,
   parseContacts,
   quoteSheetName,
+  resolveColumns,
+  columnToLetter,
   type HeaderMap,
   type SheetColumns,
 } from './sheet-parser';
@@ -31,6 +36,8 @@ export interface SheetsGateway {
   getSpreadsheet(spreadsheetId: string): Promise<{ title: string; sheets: { title: string; rowCount: number }[] }>;
   getValues(spreadsheetId: string, range: string): Promise<string[][]>;
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
+  /** Adds columns to the worksheet's grid until it has at least `minColumns`. Google rejects writes outside the grid. */
+  ensureColumnCount(spreadsheetId: string, worksheetName: string, minColumns: number): Promise<void>;
 }
 
 /**
@@ -77,6 +84,22 @@ export function createSheetsClient(credentials: GoogleCredentials, fetchImplemen
           // RAW: values are stored literally, so an error message starting with "=" can never become a formula.
           valueInputOption: 'RAW',
           data: writes.map((w) => ({ range: w.range, values: [[w.value]] })),
+        },
+      });
+    },
+    async ensureColumnCount(spreadsheetId, worksheetName, minColumns) {
+      const res = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.columnCount',
+      });
+      const props = (res.data.sheets ?? []).find((s) => s.properties?.title === worksheetName)?.properties;
+      if (props?.sheetId === undefined || props.sheetId === null) return;
+      const columnCount = props.gridProperties?.columnCount ?? 0;
+      if (columnCount >= minColumns) return;
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: {
+          requests: [{ appendDimension: { sheetId: props.sheetId, dimension: 'COLUMNS', length: minColumns - columnCount } }],
         },
       });
     },
@@ -175,16 +198,21 @@ export function normalizeGoogleError(error: unknown, context: { serviceAccountEm
 // Service
 // ---------------------------------------------------------------------------
 
+/** 'tag' is the status column (Batch Flag or tag); the rest are the app's tracking columns. */
+export type TrackedField = 'tag' | TrackingColumn;
+
 /**
- * A status change for one row. The app writes only the status column (Batch Flag or tag).
- * Before writing, the row must still hold the same email and be in `expectedState`.
+ * A change to one row. Only the status column and the tracking columns are ever written.
+ * Before writing, the row must still hold the same email (and campaign ID / state when given).
  */
 export interface RowUpdate {
   sheetRow: number;
   email: string;
-  /** 'new': an untouched New contact. 'processing': reserved by a campaign (Processing). */
-  expectedState: 'new' | 'processing';
-  status: string;
+  /** Row must still carry this campaign ID (when set) before we overwrite it. */
+  expectedCampaignId?: string;
+  /** Row must currently be in this state: an untouched New contact, or a stale Processing/review row. */
+  expectedState?: 'new' | 'stale';
+  fields: Partial<Record<TrackedField, string>>;
 }
 
 export interface RowUpdateFailure {
@@ -198,6 +226,7 @@ export interface SheetSnapshot {
   headerNames: string[];
   contacts: ContactRow[];
   totalRows: number;
+  missingTrackingColumns: string[];
 }
 
 export interface SheetTarget {
@@ -270,6 +299,7 @@ export class GoogleSheetsService {
       newCount: snapshot.contacts.filter((c) => isNewTag(c.tag)).length,
       headers: snapshot.headerNames,
       columns: describeColumns(snapshot.columns, snapshot.headerNames),
+      missingTrackingColumns: snapshot.missingTrackingColumns,
     };
   }
 
@@ -301,6 +331,7 @@ export class GoogleSheetsService {
       headerNames: (values[0] ?? []).map(String),
       contacts,
       totalRows: contacts.length,
+      missingTrackingColumns: missingTrackingColumns(columns),
     };
   }
 
@@ -318,9 +349,31 @@ export class GoogleSheetsService {
     return findStaleProcessing(await this.readContacts());
   }
 
+  /** Appends any missing tracking columns to the right end of the header row. Returns the added names. */
+  async initializeTrackingColumns(): Promise<string[]> {
+    const headerRow = await this.getHeaders();
+    const missing = missingTrackingColumns(resolveColumns(buildHeaderMap(headerRow)));
+    if (missing.length === 0) return [];
+    const normalized = headerRow.map((h) => h.trim());
+    // Place new columns after the last non-empty header cell.
+    let lastUsed = normalized.length - 1;
+    while (lastUsed >= 0 && normalized[lastUsed] === '') lastUsed--;
+    const writes = missing.map((name, i) => ({
+      range: `${this.sheetRange}!${columnToLetter(lastUsed + 1 + i)}1`,
+      value: name,
+    }));
+    const neededColumns = lastUsed + 1 + missing.length;
+    await this.call('grid resize', () =>
+      this.gateway.ensureColumnCount(this.target.spreadsheetId, this.target.worksheetName, neededColumns),
+    );
+    await this.call('header write', () => this.gateway.batchWrite(this.target.spreadsheetId, writes));
+    this.logger.info('google', `Added tracking columns: ${missing.join(', ')}`);
+    return missing;
+  }
+
   /**
    * Applies row updates after re-reading the sheet. Each update is written only if a row with
-   * the same email in the expected state is found; rows that moved are re-located.
+   * the same email (and campaign ID / state, when given) is found; rows that moved are re-located.
    * Returns the updates that could not be applied safely.
    */
   async applyRowUpdates(updates: RowUpdate[]): Promise<RowUpdateFailure[]> {
@@ -341,21 +394,27 @@ export class GoogleSheetsService {
     for (const update of updates) {
       const row = this.locateRow(update, byRow, snapshot.contacts);
       if (row === null) {
-        failures.push({ update, reason: 'Row could not be located safely (email or status no longer match)' });
+        failures.push({ update, reason: 'Row could not be located safely (email, campaign ID or status no longer match)' });
         continue;
       }
-      const statusColumn = snapshot.columns.status;
-      if (statusColumn === undefined) {
+      const columnOf = (field: TrackedField) =>
+        field === 'tag' ? snapshot.columns.status : snapshot.columns.tracking[field];
+      const fields = Object.keys(update.fields) as TrackedField[];
+      if (fields.includes('tag') && columnOf('tag') === undefined) {
         failures.push({ update, reason: 'Missing column: Batch Flag' });
         continue;
       }
+      // Tracking columns are added before a real campaign; a sheet without them still gets its status written.
       if (row !== update.sheetRow) {
         this.logger.warn('google', 'Row moved since it was read; writing to its new position', {
           fromRow: update.sheetRow,
           toRow: row,
         });
       }
-      writes.push({ range: cellRange(this.target.worksheetName, statusColumn, row), value: update.status });
+      for (const field of fields) {
+        const col = columnOf(field);
+        if (col !== undefined) writes.push({ range: cellRange(this.target.worksheetName, col, row), value: update.fields[field] ?? '' });
+      }
       applied.push(update);
     }
 
@@ -374,7 +433,9 @@ export class GoogleSheetsService {
     const email = update.email.trim().toLowerCase();
     const matches = (c: ContactRow) =>
       c.email.trim().toLowerCase() === email &&
-      (update.expectedState === 'new' ? isNewTag(c.tag) : isStaleProcessing(c));
+      (update.expectedCampaignId === undefined || c.campaignId === update.expectedCampaignId) &&
+      (update.expectedState !== 'new' || (isNewTag(c.tag) && !looksAlreadySent(c))) &&
+      (update.expectedState !== 'stale' || isStaleProcessing(c));
     const atRow = byRow.get(update.sheetRow);
     if (atRow && matches(atRow)) return update.sheetRow;
     const candidates = contacts.filter(matches);
@@ -391,8 +452,8 @@ export class GoogleSheetsService {
    * Reserves contacts before any email is sent. Done as one batch write right after the
    * sheet was read, verified against a fresh read so a row edited in between is not reserved.
    */
-  async reserveContacts(contacts: ContactRow[]): Promise<RowUpdateFailure[]> {
-    return this.applyRowUpdates(contacts.map((c) => reservationUpdate(c)));
+  async reserveContacts(contacts: ContactRow[], campaignId: string): Promise<RowUpdateFailure[]> {
+    return this.applyRowUpdates(contacts.map((c) => reservationUpdate(c, campaignId)));
   }
 
   describeRow(contact: Pick<ContactRow, 'sheetRow' | 'email'>): string {
@@ -404,21 +465,66 @@ export class GoogleSheetsService {
 // Row update builders (pure; shared with the campaign and recovery code)
 // ---------------------------------------------------------------------------
 
-type RowRef = Pick<ContactRow, 'sheetRow' | 'email'>;
-
-export function reservationUpdate(contact: RowRef): RowUpdate {
-  return { sheetRow: contact.sheetRow, email: contact.email, expectedState: 'new', status: TAG.Processing };
+export function reservationUpdate(contact: Pick<ContactRow, 'sheetRow' | 'email'>, campaignId: string): RowUpdate {
+  return {
+    sheetRow: contact.sheetRow,
+    email: contact.email,
+    expectedState: 'new',
+    fields: { tag: TAG.Processing, send_status: SEND_STATUS.Processing, campaign_id: campaignId, last_error: '' },
+  };
 }
 
-export function sentUpdate(contact: RowRef): RowUpdate {
-  return { sheetRow: contact.sheetRow, email: contact.email, expectedState: 'processing', status: TAG.Sent };
+export function sentUpdate(
+  contact: Pick<ContactRow, 'sheetRow' | 'email'>,
+  campaignId: string,
+  messageId: string,
+  sentAt: string,
+): RowUpdate {
+  return {
+    sheetRow: contact.sheetRow,
+    email: contact.email,
+    expectedCampaignId: campaignId,
+    fields: {
+      tag: TAG.Sent,
+      send_status: SEND_STATUS.Sent,
+      campaign_id: campaignId,
+      sent_at: sentAt,
+      message_id: messageId,
+      last_error: '',
+    },
+  };
 }
 
-export function failedUpdate(contact: RowRef): RowUpdate {
-  return { sheetRow: contact.sheetRow, email: contact.email, expectedState: 'processing', status: TAG.Failed };
+export function failedUpdate(contact: Pick<ContactRow, 'sheetRow' | 'email'>, campaignId: string, error: string): RowUpdate {
+  return {
+    sheetRow: contact.sheetRow,
+    email: contact.email,
+    expectedCampaignId: campaignId,
+    fields: { tag: TAG.Failed, send_status: SEND_STATUS.Failed, campaign_id: campaignId, last_error: error.slice(0, 500) },
+  };
+}
+
+/** Delivery state unknown: keep the row out of the New pool and flag it for manual review. */
+export function reviewUpdate(contact: Pick<ContactRow, 'sheetRow' | 'email'>, campaignId: string, error: string): RowUpdate {
+  return {
+    sheetRow: contact.sheetRow,
+    email: contact.email,
+    expectedCampaignId: campaignId,
+    fields: {
+      tag: TAG.Processing,
+      send_status: SEND_STATUS.Review,
+      campaign_id: campaignId,
+      last_error: `Manual review required: ${error}`.slice(0, 500),
+    },
+  };
 }
 
 /** Returns a reserved-but-never-sent contact to the New pool. */
-export function releaseUpdate(contact: RowRef): RowUpdate {
-  return { sheetRow: contact.sheetRow, email: contact.email, expectedState: 'processing', status: TAG.New };
+export function releaseUpdate(contact: Pick<ContactRow, 'sheetRow' | 'email'>, campaignId: string): RowUpdate {
+  return {
+    sheetRow: contact.sheetRow,
+    email: contact.email,
+    expectedCampaignId: campaignId,
+    fields: { tag: TAG.New, send_status: '', campaign_id: '', last_error: '' },
+  };
 }

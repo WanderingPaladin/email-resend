@@ -34,6 +34,7 @@ const api: EmailAppApi = {
   },
   google: {
     testConnection: () => invoke(IPC.googleTest),
+    initializeTrackingColumns: () => invoke(IPC.googleInitColumns),
     previewContacts: (batchSize) => invoke(IPC.contactsPreview, { batchSize }),
   },
   mailer: {

@@ -35,6 +35,7 @@ export interface EmailAppApi {
   };
   google: {
     testConnection(): Promise<GoogleTestResult>;
+    initializeTrackingColumns(): Promise<{ added: string[] }>;
     previewContacts(batchSize: number): Promise<PreviewResult>;
   };
   mailer: {

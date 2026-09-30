@@ -37,6 +37,9 @@ export class FakeSheetsGateway implements SheetsGateway {
   /** Throw from the next N batchWrite calls. */
   failWrites = 0;
   failWriteError: unknown = Object.assign(new Error('Service unavailable'), { response: { status: 403 } });
+  /** Grid width, like Google's columnCount. Writes beyond it fail as Google's do. */
+  columnCount = 26;
+  gridResizes = 0;
   /** Called before each read so tests can mutate the sheet mid-campaign. */
   beforeRead?: () => void;
 
@@ -68,6 +71,14 @@ export class FakeSheetsGateway implements SheetsGateway {
     return { title: this.title, sheets: [{ title: this.worksheetName, rowCount: 1000 }] };
   }
 
+  async ensureColumnCount(_id: string, worksheetName: string, minColumns: number): Promise<void> {
+    this.checkSheet(worksheetName);
+    if (this.columnCount < minColumns) {
+      this.columnCount = minColumns;
+      this.gridResizes++;
+    }
+  }
+
   async getValues(_id: string, range: string): Promise<string[][]> {
     this.beforeRead?.();
     this.reads++;
@@ -87,6 +98,11 @@ export class FakeSheetsGateway implements SheetsGateway {
       const { sheet, cell } = this.parse(w.range);
       this.checkSheet(sheet);
       if (!cell) throw new Error('Only single-cell writes are expected');
+      if (cell.col >= this.columnCount) {
+        throw Object.assign(new Error(`Range exceeds grid limits. Max columns: ${this.columnCount}`), {
+          response: { status: 400 },
+        });
+      }
       const rowIndex = cell.row - 1;
       while (this.rows.length <= rowIndex) this.rows.push([]);
       const row = this.rows[rowIndex] ?? [];
@@ -104,8 +120,19 @@ export class FakeSheetsGateway implements SheetsGateway {
   }
 }
 
-/** first_name/last_name/email/tag plus a column the app must never read or write. */
-export const FULL_HEADERS = ['first_name', 'last_name', 'email', 'tag', 'notes'];
+/** Contact columns, a column the app must never touch (notes), and the tracking columns. */
+export const FULL_HEADERS = [
+  'first_name',
+  'last_name',
+  'email',
+  'tag',
+  'notes',
+  'send_status',
+  'campaign_id',
+  'sent_at',
+  'message_id',
+  'last_error',
+];
 
 /** Builds sheet rows from partial objects using FULL_HEADERS. */
 export function sheetRows(contacts: Record<string, string>[], headers = FULL_HEADERS): string[][] {

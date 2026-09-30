@@ -15,6 +15,11 @@ export function registerGoogleIpc(ctx: AppContext, deps: IpcDeps): void {
     }
   });
 
+  handle(deps, IPC.googleInitColumns, null, async () => {
+    if (ctx.campaign.isCampaignRunning()) throw new Error('A campaign is already running.');
+    return { added: await ctx.createSheets().initializeTrackingColumns() };
+  });
+
   handle(deps, IPC.contactsPreview, previewInputSchema, ({ batchSize }) => ctx.campaign.previewContacts(batchSize));
 
   handle(deps, IPC.mailerValidate, null, async () => {

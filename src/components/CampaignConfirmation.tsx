@@ -1,3 +1,4 @@
+import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Dialog } from '@/components/ui/dialog';
 
@@ -8,6 +9,7 @@ export function CampaignConfirmation({
   subject,
   concurrency,
   dryRun,
+  missingTrackingColumns,
   starting,
   onCancel,
   onConfirm,
@@ -18,6 +20,7 @@ export function CampaignConfirmation({
   subject: string;
   concurrency: number;
   dryRun: boolean;
+  missingTrackingColumns: string[];
   starting: boolean;
   onCancel: () => void;
   onConfirm: () => void;
@@ -61,6 +64,11 @@ export function CampaignConfirmation({
           <dt className="text-slate-500">Concurrency</dt>
           <dd className="font-medium">{concurrency}</dd>
         </dl>
+        {!dryRun && missingTrackingColumns.length > 0 && (
+          <Alert tone="warning">
+            {`These tracking columns will be added to the sheet header first: ${missingTrackingColumns.join(', ')}.`}
+          </Alert>
+        )}
         {!dryRun && <p className="text-slate-600">Proceed?</p>}
       </div>
     </Dialog>

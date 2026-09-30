@@ -1,4 +1,4 @@
-import { TAG } from '../../shared/constants';
+import { SEND_STATUS, TAG } from '../../shared/constants';
 import type { RecoveryApplyInput } from '../../shared/schemas';
 import type { ContactRow, ManualReviewItem, RecoveryApplyResult, RecoveryState, StaleContact } from '../../shared/types';
 import type { SettingsRepository } from '../repositories/settings.repository';
@@ -26,15 +26,20 @@ export class RecoveryService {
   constructor(private readonly deps: RecoveryServiceDeps) {}
 
   /**
-   * The sheet only holds the Batch Flag, so the campaign that reserved a Processing row is
-   * found in the local journals: the most recent campaign that reserved this row for this email.
+   * Finds the campaign that reserved a Processing row: its campaign_id cell, or else (older
+   * rows, or a cleared cell) the most recent local journal that reserved this row for this email.
    */
-  private journalFor(row: Pick<ContactRow, 'sheetRow' | 'email'>): { campaignId: string; entry?: JournalEntry; review?: ManualReviewItem } {
+  private journalFor(row: Pick<ContactRow, 'sheetRow' | 'email' | 'campaignId'>): { campaignId: string; entry?: JournalEntry; review?: ManualReviewItem } {
     const email = row.email.trim().toLowerCase();
     const review = this.deps.repo
       .get('manualReview')
       .find((r) => r.sheetRow === row.sheetRow && r.email.trim().toLowerCase() === email);
     const marker = this.deps.repo.get('activeCampaign');
+    if (row.campaignId) {
+      const own = this.deps.journal.read(row.campaignId);
+      const ownReview = review && review.campaignId === row.campaignId ? review : undefined;
+      return { campaignId: row.campaignId, entry: lastSendOutcome(own, row.sheetRow), review: ownReview };
+    }
     const candidates = [marker?.campaignId, review?.campaignId, ...this.deps.repo.get('campaignHistory').map((h) => h.id)].filter(
       (id): id is string => Boolean(id),
     );
@@ -72,6 +77,8 @@ export class RecoveryService {
           email: row.email,
           firstName: row.firstName,
           tag: row.tag,
+          sendStatus: row.sendStatus,
+          lastError: row.lastError,
           campaignId,
           journalResendId: entry?.resendId ?? review?.resendId ?? '',
           journalOutcome: entry?.outcome ?? (review ? 'accepted' : 'none'),
@@ -109,6 +116,7 @@ export class RecoveryService {
         continue;
       }
       const { entry, review } = this.journalFor(row);
+      const now = (this.deps.now ?? (() => new Date()))().toISOString();
       const acceptedId = entry?.outcome === 'accepted' ? (entry.resendId ?? '') : (review?.resendId ?? '');
 
       if (input.action === 'mark_new' && acceptedId) {
@@ -119,8 +127,26 @@ export class RecoveryService {
         continue;
       }
 
-      const status = input.action === 'mark_new' ? TAG.New : input.action === 'mark_failed' ? TAG.Failed : TAG.Sent;
-      updates.push({ sheetRow: row.sheetRow, email: row.email, expectedState: 'processing', status });
+      const base = { sheetRow: row.sheetRow, email: row.email, expectedState: 'stale' as const };
+      if (input.action === 'mark_new') {
+        updates.push({ ...base, fields: { tag: TAG.New, send_status: '', campaign_id: '', last_error: '' } });
+      } else if (input.action === 'mark_failed') {
+        updates.push({
+          ...base,
+          fields: { tag: TAG.Failed, send_status: SEND_STATUS.Failed, last_error: 'Marked Failed during manual review' },
+        });
+      } else {
+        updates.push({
+          ...base,
+          fields: {
+            tag: TAG.Sent,
+            send_status: SEND_STATUS.Sent,
+            sent_at: row.sentAt || entry?.ts || now,
+            message_id: row.messageId || acceptedId,
+            last_error: '',
+          },
+        });
+      }
     }
 
     const failures = await sheets.applyRowUpdates(updates);
