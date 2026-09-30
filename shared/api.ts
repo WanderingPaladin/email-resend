@@ -7,6 +7,7 @@ import type {
   CampaignState,
   CampaignSummary,
   ConfigView,
+  FinderProgress,
   FinderSaveResult,
   FinderSearchResult,
   GoogleTestResult,
@@ -46,6 +47,8 @@ export interface EmailAppApi {
     search(input: FinderSearchInput): Promise<FinderSearchResult>;
     /** Creates a new tab in the spreadsheet with the given contacts. */
     save(input: FinderSaveInput): Promise<FinderSaveResult>;
+    /** Progress of a running search (one event per search round). */
+    onProgress(listener: (progress: FinderProgress) => void): Unsubscribe;
   };
   mailer: {
     /** Checks the selected provider's credentials without sending an email. */

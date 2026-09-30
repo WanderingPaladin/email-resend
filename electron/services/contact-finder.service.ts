@@ -41,8 +41,14 @@ export const FINDER_INSTRUCTIONS = [
   'If you find nobody, answer {"contacts":[]}.',
 ].join('\n');
 
-export function buildSearchInput(query: string, maxResults: number): string {
-  return `Find up to ${maxResults} people matching this description:\n${query.trim()}`;
+/** Emails from earlier rounds sent back to the model so it looks for other people (bounded to keep the request small). */
+const MAX_EXCLUDED_IN_PROMPT = 300;
+
+export function buildSearchInput(query: string, maxResults: number, exclude: readonly string[] = []): string {
+  const base = `Find up to ${maxResults} people matching this description:\n${query.trim()}`;
+  const list = exclude.slice(-MAX_EXCLUDED_IN_PROMPT);
+  if (list.length === 0) return base;
+  return `${base}\n\nThese email addresses were already found or cannot be used. Do not include them; find different people:\n${list.join('\n')}`;
 }
 
 /** Text of the assistant's final message in a Responses API result. */
@@ -95,7 +101,7 @@ export function cleanFoundContacts(
   raw: readonly RawContact[],
   existingEmails: ReadonlySet<string>,
   maxResults: number,
-): { contacts: RawContact[]; dropped: FinderSearchResult['dropped'] } {
+): { contacts: RawContact[]; dropped: Omit<FinderSearchResult['dropped'], 'notOnPage'> } {
   const dropped = { invalid: 0, noSource: 0, duplicate: 0, alreadyInSheet: 0 };
   const seen = new Set<string>();
   const contacts: RawContact[] = [];
@@ -201,8 +207,8 @@ export class ContactFinder {
     return { message: `OpenAI key works and model "${this.model}" is available.` };
   }
 
-  async search(query: string, maxResults: number): Promise<RawContact[]> {
-    this.logger.info('finder', 'Contact search started', { model: this.model, maxResults });
+  async search(query: string, maxResults: number, exclude: readonly string[] = []): Promise<RawContact[]> {
+    this.logger.info('finder', 'Contact search started', { model: this.model, maxResults, excluded: exclude.length });
     const { status, body } = await this.api(
       '/responses',
       {
@@ -210,7 +216,7 @@ export class ContactFinder {
         body: JSON.stringify({
           model: this.model,
           instructions: FINDER_INSTRUCTIONS,
-          input: buildSearchInput(query, maxResults),
+          input: buildSearchInput(query, maxResults, exclude),
           tools: [{ type: 'web_search' }],
         }),
       },
@@ -270,4 +276,82 @@ export class ContactFinder {
       return null;
     }
   }
+}
+
+/** How many searches Find Contacts runs at most to reach the requested number. */
+export const MAX_SEARCH_ROUNDS = 5;
+
+export interface FinderRoundProgress {
+  round: number;
+  maxRounds: number;
+  found: number;
+  target: number;
+}
+
+type Searcher = Pick<ContactFinder, 'search' | 'checkOnPage'>;
+
+/**
+ * Searches repeatedly until `target` usable contacts are found. Results that are invalid, repeated,
+ * already in the spreadsheet or not on their source page do not count, and the next round asks for
+ * the missing number while excluding every email seen so far. Stops after `maxRounds`, or after two
+ * rounds in a row that add nobody.
+ */
+export async function findUntilTarget(
+  finder: Searcher,
+  query: string,
+  target: number,
+  existing: ReadonlySet<string>,
+  options: { maxRounds?: number; onProgress?: (p: FinderRoundProgress) => void; logger?: AppLogger } = {},
+): Promise<Omit<FinderSearchResult, 'checkedAgainstSheet'>> {
+  const maxRounds = options.maxRounds ?? MAX_SEARCH_ROUNDS;
+  const accepted: FoundContact[] = [];
+  const notOnPage: FoundContact[] = [];
+  const dropped = { invalid: 0, noSource: 0, duplicate: 0, alreadyInSheet: 0, notOnPage: 0 };
+  const seen = new Set<string>(); // every email returned so far, in any round
+  let rounds = 0;
+  let emptyRounds = 0;
+  let warning: string | undefined;
+
+  while (accepted.length < target && rounds < maxRounds) {
+    rounds++;
+    const need = target - accepted.length;
+    let raw: RawContact[];
+    try {
+      raw = await finder.search(query, need, [...seen]);
+    } catch (error) {
+      // Keep what earlier rounds found; fail only when there is nothing to show.
+      if (accepted.length + notOnPage.length === 0) throw error;
+      warning = error instanceof Error ? error.message : String(error);
+      break;
+    }
+
+    const fresh: RawContact[] = [];
+    for (const contact of raw) {
+      const key = contact.email.trim().toLowerCase();
+      if (key && seen.has(key)) dropped.duplicate++;
+      else fresh.push(contact);
+      if (key) seen.add(key);
+    }
+    const cleaned = cleanFoundContacts(fresh, existing, Number.MAX_SAFE_INTEGER);
+    dropped.invalid += cleaned.dropped.invalid;
+    dropped.noSource += cleaned.dropped.noSource;
+    dropped.duplicate += cleaned.dropped.duplicate;
+    dropped.alreadyInSheet += cleaned.dropped.alreadyInSheet;
+
+    const before = accepted.length;
+    for (const contact of await finder.checkOnPage(cleaned.contacts)) {
+      if (contact.emailOnPage === 'no') {
+        dropped.notOnPage++;
+        notOnPage.push(contact);
+      } else if (accepted.length < target) {
+        accepted.push(contact);
+      }
+    }
+    options.onProgress?.({ round: rounds, maxRounds, found: accepted.length, target });
+    options.logger?.info('finder', `Search round ${rounds}: ${accepted.length} of ${target} found`);
+    emptyRounds = accepted.length === before ? emptyRounds + 1 : 0;
+    if (emptyRounds >= 2) break;
+  }
+
+  return { contacts: [...accepted, ...notOnPage], dropped, rounds, target, found: accepted.length, warning };
 }

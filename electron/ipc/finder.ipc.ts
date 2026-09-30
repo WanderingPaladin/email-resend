@@ -2,8 +2,8 @@ import { FINDER_TAB_HEADERS, IPC, TRACKING_COLUMNS } from '../../shared/constant
 import { finderSaveInputSchema, finderSearchInputSchema } from '../../shared/schemas';
 import type { FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
 import type { AppContext } from '../app-context';
-import { cleanFoundContacts } from '../services/contact-finder.service';
-import { handle, type IpcDeps } from './handle';
+import { findUntilTarget } from '../services/contact-finder.service';
+import { broadcast, handle, type IpcDeps } from './handle';
 
 const ON_PAGE_LABEL: Record<FoundContact['emailOnPage'], string> = { yes: 'Yes', no: 'No', unknown: 'Could not check' };
 
@@ -43,7 +43,6 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
 
   handle(deps, IPC.finderSearch, finderSearchInputSchema, async ({ query, maxResults }): Promise<FinderSearchResult> => {
     const finder = ctx.createFinder();
-    const raw = await finder.search(query, maxResults);
 
     // Leave out people who are already in any tab of the spreadsheet.
     let existing = new Set<string>();
@@ -59,10 +58,12 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
       }
     }
 
-    const { contacts, dropped } = cleanFoundContacts(raw, existing, maxResults);
-    const checked = await finder.checkOnPage(contacts);
-    ctx.logger.info('finder', `Contact search finished with ${checked.length} contact(s)`, dropped);
-    return { contacts: checked, dropped, checkedAgainstSheet };
+    const result = await findUntilTarget(finder, query, maxResults, existing, {
+      logger: ctx.logger,
+      onProgress: (progress) => broadcast(IPC.finderProgress, progress),
+    });
+    ctx.logger.info('finder', `Contact search finished: ${result.found} of ${maxResults} in ${result.rounds} round(s)`, result.dropped);
+    return { ...result, checkedAgainstSheet };
   });
 
   handle(deps, IPC.finderSave, finderSaveInputSchema, async ({ tabName, contacts }): Promise<FinderSaveResult> => {

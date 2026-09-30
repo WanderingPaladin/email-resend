@@ -285,10 +285,28 @@ export interface FoundContact {
 
 export interface FinderSearchResult {
   contacts: FoundContact[];
-  /** Results dropped before showing: invalid email, no source page, repeated, or already in any tab of the spreadsheet. */
-  dropped: { invalid: number; noSource: number; duplicate: number; alreadyInSheet: number };
+  /**
+   * Results that did not count: invalid email, no source page, repeated, already in any tab of the
+   * spreadsheet, or not found on the source page (those are still listed, unselected).
+   */
+  dropped: { invalid: number; noSource: number; duplicate: number; alreadyInSheet: number; notOnPage: number };
+  /** Number of searches run to reach the target. */
+  rounds: number;
+  /** Requested number of contacts. */
+  target: number;
+  /** Usable contacts found (email on the page or page not checkable). Less than target when the search stopped short. */
+  found: number;
+  /** Why the search stopped early, when a later round failed. */
+  warning?: string;
   /** False when the spreadsheet could not be read to drop existing contacts. */
   checkedAgainstSheet: boolean;
+}
+
+export interface FinderProgress {
+  round: number;
+  maxRounds: number;
+  found: number;
+  target: number;
 }
 
 export interface FinderSaveResult {

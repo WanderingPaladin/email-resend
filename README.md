@@ -152,6 +152,10 @@ saves them to a new tab of your spreadsheet.
    whose email already appears in **any tab** of the spreadsheet (the Emails tab, earlier search tabs,
    any column) are left out. The same check runs again when you save, and the app tells you how many
    were skipped.
+   When results are skipped (including emails not found on their page), the app searches again for
+   the missing number, telling the model which emails to leave out, until it reaches the number you
+   asked for. It stops after 5 searches, or after 2 searches in a row that find nobody new, and says
+   how many it found. Each search uses OpenAI credits.
 4. Pick a tab name and click **Save to New Tab**. The new tab has Name, Email, Organization, Role,
    Source URL, Email on page, Batch Flag and the tracking columns. Existing tabs are never overwritten.
 

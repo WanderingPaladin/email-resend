@@ -1,6 +1,6 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { MAX_FINDER_RESULTS } from '@shared/constants';
-import type { ConfigView, FinderSearchResult, FoundContact } from '@shared/types';
+import type { ConfigView, FinderProgress, FinderSearchResult, FoundContact } from '@shared/types';
 import type { PageId } from '@/components/AppSidebar';
 import { Alert, Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -42,18 +42,31 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
   const googleReady = Boolean(config?.settings.spreadsheetId && config.settings.serviceAccountEmail && config.hasGooglePrivateKey);
   const chosen = useMemo(() => result?.contacts.filter((c) => selected.has(c.email)) ?? [], [result, selected]);
 
+  const [progress, setProgress] = useState<FinderProgress | null>(null);
+  useEffect(() => api().finder.onProgress(setProgress), []);
+
   const search = async () => {
     setSearching(true);
     setMessage(null);
     setResult(null);
+    setProgress(null);
     try {
       const count = Math.min(MAX_FINDER_RESULTS, Math.max(1, Math.round(Number(maxResults)) || 20));
       const next = await api().finder.search({ query, maxResults: count });
       setResult(next);
-      // Pre-select only contacts whose email was seen on the source page.
-      setSelected(new Set(next.contacts.filter((c) => c.emailOnPage === 'yes').map((c) => c.email)));
+      // Pre-select the contacts that count toward the target; emails missing from their page stay unselected.
+      setSelected(new Set(next.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)));
       setTabName(defaultTabName());
-      if (next.contacts.length === 0) setMessage({ tone: 'warning', text: 'No new contacts were found. Try describing the people differently.' });
+      if (next.contacts.length === 0) {
+        setMessage({ tone: 'warning', text: `No new contacts were found after ${next.rounds} search(es). Try describing the people differently.` });
+      } else if (next.found < next.target) {
+        setMessage({
+          tone: 'warning',
+          text:
+            `Found ${next.found} of ${next.target} after ${next.rounds} search(es), then stopped. ` +
+            (next.warning ? `The last search failed: ${next.warning}` : 'Try a broader description to find more.'),
+        });
+      }
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
     } finally {
@@ -96,6 +109,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
         dropped.duplicate && `${dropped.duplicate} repeated`,
         dropped.invalid && `${dropped.invalid} with an invalid email`,
         dropped.noSource && `${dropped.noSource} without a source page`,
+        dropped.notOnPage && `${dropped.notOnPage} not on their source page (listed, not selected)`,
       ].filter(Boolean)
     : [];
 
@@ -131,10 +145,17 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
             <Button loading={searching} disabled={!hasKey || query.trim().length < 3} onClick={() => void search()}>
               Search
             </Button>
-            {searching && <span className="pb-2 text-xs text-slate-500">Searching the web. This can take a minute or two.</span>}
+            {searching && (
+              <span className="pb-2 text-xs text-slate-500">
+                {progress
+                  ? `Search ${Math.min(progress.round + 1, progress.maxRounds)} of up to ${progress.maxRounds}: ${progress.found} of ${progress.target} found so far.`
+                  : 'Searching the web. Each search can take a minute or two.'}
+              </span>
+            )}
           </div>
           <p className="text-xs text-slate-500">
-            Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
+            If some results are skipped (already in your spreadsheet, repeated, invalid, or not on their page), the app searches again
+            for the rest, up to 5 times. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
             them and set Batch Flag to New.
           </p>
         </CardBody>
@@ -145,7 +166,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
       {result && result.contacts.length > 0 && (
         <Card>
           <CardHeader
-            title={`${result.contacts.length} contact(s) found`}
+            title={`${result.found} of ${result.target} contact(s) found in ${result.rounds} search(es)`}
             description={
               [
                 droppedText.length > 0 ? `Left out: ${droppedText.join(', ')}.` : '',
