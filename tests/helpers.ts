@@ -107,6 +107,16 @@ export class FakeSheetsGateway implements SheetsGateway {
     return headerOnly ? copy.slice(0, 1) : copy;
   }
 
+  async getValuesBatch(_id: string, ranges: string[]): Promise<string[][][]> {
+    this.reads++;
+    return ranges.map((range) => {
+      const { sheet } = this.parse(range);
+      const rows = sheet === this.worksheetName ? this.rows : this.tabs.get(sheet);
+      if (!rows) throw Object.assign(new Error(`Unable to parse range: ${sheet}`), { response: { status: 400 } });
+      return rows.map((r) => [...r]);
+    });
+  }
+
   async batchWrite(_id: string, writes: CellWrite[]): Promise<void> {
     if (this.failWrites > 0) {
       this.failWrites--;

@@ -1,6 +1,6 @@
 import { FINDER_TAB_HEADERS, IPC, TRACKING_COLUMNS } from '../../shared/constants';
 import { finderSaveInputSchema, finderSearchInputSchema } from '../../shared/schemas';
-import type { FinderSearchResult, FoundContact } from '../../shared/types';
+import type { FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
 import type { AppContext } from '../app-context';
 import { cleanFoundContacts } from '../services/contact-finder.service';
 import { handle, type IpcDeps } from './handle';
@@ -17,6 +17,27 @@ export function finderTabRows(contacts: readonly FoundContact[]): string[][] {
   ];
 }
 
+/** Drops contacts whose email is already in the spreadsheet, and repeats within the list (case-insensitive). */
+export function removeKnownEmails(
+  contacts: readonly FoundContact[],
+  existing: ReadonlySet<string>,
+): { unique: FoundContact[]; skippedExisting: number; skippedDuplicate: number } {
+  const seen = new Set<string>();
+  const unique: FoundContact[] = [];
+  let skippedExisting = 0;
+  let skippedDuplicate = 0;
+  for (const contact of contacts) {
+    const key = contact.email.trim().toLowerCase();
+    if (existing.has(key)) skippedExisting++;
+    else if (seen.has(key)) skippedDuplicate++;
+    else {
+      seen.add(key);
+      unique.push(contact);
+    }
+  }
+  return { unique, skippedExisting, skippedDuplicate };
+}
+
 export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
   handle(deps, IPC.openaiValidate, null, () => ctx.createFinder().validate());
 
@@ -24,16 +45,15 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
     const finder = ctx.createFinder();
     const raw = await finder.search(query, maxResults);
 
-    // Leave out people who are already in the Emails tab.
+    // Leave out people who are already in any tab of the spreadsheet.
     let existing = new Set<string>();
     let checkedAgainstSheet = false;
     if (ctx.config.isGoogleConfigured()) {
       try {
-        const contacts = await ctx.createSheets().readContacts();
-        existing = new Set(contacts.map((c) => c.email.trim().toLowerCase()).filter(Boolean));
+        existing = await ctx.createSheets().readAllEmails();
         checkedAgainstSheet = true;
       } catch (error) {
-        ctx.logger.warn('finder', 'Could not read the Emails tab to skip existing contacts', {
+        ctx.logger.warn('finder', 'Could not read the spreadsheet to skip existing contacts', {
           reason: error instanceof Error ? error.message : String(error),
         });
       }
@@ -45,7 +65,17 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
     return { contacts: checked, dropped, checkedAgainstSheet };
   });
 
-  handle(deps, IPC.finderSave, finderSaveInputSchema, ({ tabName, contacts }) =>
-    ctx.createSheets().createWorksheet(tabName, finderTabRows(contacts)),
-  );
+  handle(deps, IPC.finderSave, finderSaveInputSchema, async ({ tabName, contacts }): Promise<FinderSaveResult> => {
+    const sheets = ctx.createSheets();
+    // Checked again at save time: the sheet may have changed since the search (for example an earlier save).
+    const { unique, skippedExisting, skippedDuplicate } = removeKnownEmails(contacts, await sheets.readAllEmails());
+    if (unique.length === 0) {
+      throw new Error(
+        `Nothing was saved: all ${contacts.length} selected contact(s) are already in the spreadsheet${skippedDuplicate ? ' or repeated' : ''}.`,
+      );
+    }
+    const saved = await sheets.createWorksheet(tabName, finderTabRows(unique));
+    ctx.logger.info('finder', `Saved ${saved.rows} contact(s) to a new tab`, { skippedExisting, skippedDuplicate });
+    return { ...saved, skippedExisting, skippedDuplicate };
+  });
 }

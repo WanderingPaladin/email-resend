@@ -285,13 +285,17 @@ export interface FoundContact {
 
 export interface FinderSearchResult {
   contacts: FoundContact[];
-  /** Results dropped before showing: invalid email, no source page, repeated, or already in the Emails tab. */
+  /** Results dropped before showing: invalid email, no source page, repeated, or already in any tab of the spreadsheet. */
   dropped: { invalid: number; noSource: number; duplicate: number; alreadyInSheet: number };
-  /** False when the main sheet could not be read to drop existing contacts. */
+  /** False when the spreadsheet could not be read to drop existing contacts. */
   checkedAgainstSheet: boolean;
 }
 
 export interface FinderSaveResult {
   tabName: string;
   rows: number;
+  /** Selected contacts left out because their email is already in some tab of the spreadsheet. */
+  skippedExisting: number;
+  /** Selected contacts left out because the same email was selected twice. */
+  skippedDuplicate: number;
 }

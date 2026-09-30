@@ -149,7 +149,9 @@ saves them to a new tab of your spreadsheet.
 3. The model is told to return only addresses written on a public page, never guessed ones. The app
    then opens each source page and shows whether the email is really there (**On page**, **Not on
    page**, **Not checked**). Only On-page results are pre-selected. Invalid emails, repeats and people
-   already in your Emails tab are left out.
+   whose email already appears in **any tab** of the spreadsheet (the Emails tab, earlier search tabs,
+   any column) are left out. The same check runs again when you save, and the app tells you how many
+   were skipped.
 4. Pick a tab name and click **Save to New Tab**. The new tab has Name, Email, Organization, Role,
    Source URL, Email on page, Batch Flag and the tracking columns. Existing tabs are never overwritten.
 

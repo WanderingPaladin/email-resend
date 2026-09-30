@@ -12,7 +12,7 @@ import {
 } from '../electron/services/contact-finder.service';
 import { GoogleSheetsService } from '../electron/services/google-sheets.service';
 import { redactText } from '../electron/services/log-format';
-import { finderTabRows } from '../electron/ipc/finder.ipc';
+import { finderTabRows, removeKnownEmails } from '../electron/ipc/finder.ipc';
 import { FakeFetch, FakeSheetsGateway, MemoryLogger, noSleep, sheetRows } from './helpers';
 
 const raw = (email: string, extra: Partial<RawContact> = {}): RawContact => ({
@@ -165,5 +165,27 @@ describe('saving results to a new tab', () => {
 
   it('never logs an OpenAI key', () => {
     expect(redactText('key sk-proj-abcdefghijklmnopqrstuvwxyz used')).toBe('key [REDACTED API KEY] used');
+  });
+});
+
+describe('duplicate check across the whole spreadsheet', () => {
+  const found = (email: string) => ({ name: 'X', email, organization: '', role: '', sourceUrl: 'https://x.com', emailOnPage: 'yes' as const });
+
+  it('reads emails from every tab and any column', async () => {
+    const gateway = new FakeSheetsGateway(sheetRows([{ first_name: 'A', email: 'Ana@Acme.com', tag: 'New' }]));
+    gateway.tabs.set('Found 1', [['Name', 'Email'], ['Bo', 'bo@acme.com']]);
+    gateway.tabs.set('Notes', [['Contact', 'Other'], ['mailto:cy@acme.com', 'not an email @ all']]);
+    const sheets = new GoogleSheetsService(gateway, { spreadsheetId: 's', worksheetName: 'Emails', serviceAccountEmail: '' }, new MemoryLogger(), { sleepFn: noSleep });
+    expect([...(await sheets.readAllEmails())].sort()).toEqual(['ana@acme.com', 'bo@acme.com', 'cy@acme.com']);
+  });
+
+  it('skips emails already in the spreadsheet and repeats in the selection', () => {
+    const result = removeKnownEmails(
+      [found('new@acme.com'), found('BO@acme.com'), found('New@Acme.com'), found('other@acme.com')],
+      new Set(['bo@acme.com']),
+    );
+    expect(result.unique.map((c) => c.email)).toEqual(['new@acme.com', 'other@acme.com']);
+    expect(result.skippedExisting).toBe(1);
+    expect(result.skippedDuplicate).toBe(1);
   });
 });

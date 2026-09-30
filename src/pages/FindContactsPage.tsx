@@ -66,9 +66,13 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
     setMessage(null);
     try {
       const saved = await api().finder.save({ tabName, contacts: chosen });
+      const skipped = [
+        saved.skippedExisting && `${saved.skippedExisting} already in the spreadsheet`,
+        saved.skippedDuplicate && `${saved.skippedDuplicate} repeated`,
+      ].filter(Boolean);
       setMessage({
         tone: 'success',
-        text: `Saved ${saved.rows} contact(s) to the new tab "${saved.tabName}". Their Batch Flag is empty: set it to New for each contact you are authorized to email, then choose that tab in Settings (or copy the rows into your Emails tab) to send.`,
+        text: `Saved ${saved.rows} contact(s) to the new tab "${saved.tabName}".${skipped.length ? ` Skipped ${skipped.join(' and ')}.` : ''} Their Batch Flag is empty: set it to New for each contact you are authorized to email, then choose that tab in Settings (or copy the rows into your Emails tab) to send.`,
       });
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
@@ -88,7 +92,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
   const dropped = result?.dropped;
   const droppedText = dropped
     ? [
-        dropped.alreadyInSheet && `${dropped.alreadyInSheet} already in your sheet`,
+        dropped.alreadyInSheet && `${dropped.alreadyInSheet} already in your spreadsheet`,
         dropped.duplicate && `${dropped.duplicate} repeated`,
         dropped.invalid && `${dropped.invalid} with an invalid email`,
         dropped.noSource && `${dropped.noSource} without a source page`,
@@ -145,7 +149,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
             description={
               [
                 droppedText.length > 0 ? `Left out: ${droppedText.join(', ')}.` : '',
-                result.checkedAgainstSheet ? '' : 'Your Emails tab could not be read, so existing contacts were not left out.',
+                result.checkedAgainstSheet ? '' : 'Your spreadsheet could not be read, so existing contacts were not left out. They are checked again when you save.',
               ]
                 .filter(Boolean)
                 .join(' ') || undefined

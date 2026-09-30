@@ -12,6 +12,7 @@ import {
   findStaleProcessing,
   isNewTag,
   isStaleProcessing,
+  isValidEmail,
   looksAlreadySent,
   missingRequiredColumns,
   missingTrackingColumns,
@@ -35,6 +36,8 @@ export interface CellWrite {
 export interface SheetsGateway {
   getSpreadsheet(spreadsheetId: string): Promise<{ title: string; sheets: { title: string; rowCount: number }[] }>;
   getValues(spreadsheetId: string, range: string): Promise<string[][]>;
+  /** Reads several ranges in one request, in the same order. */
+  getValuesBatch(spreadsheetId: string, ranges: string[]): Promise<string[][][]>;
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
   /** Adds columns to the worksheet's grid until it has at least `minColumns`. Google rejects writes outside the grid. */
   ensureColumnCount(spreadsheetId: string, worksheetName: string, minColumns: number): Promise<void>;
@@ -79,6 +82,18 @@ export function createSheetsClient(credentials: GoogleCredentials, fetchImplemen
         valueRenderOption: 'FORMATTED_VALUE',
       });
       return (res.data.values ?? []).map((row) => row.map((v) => (v === null || v === undefined ? '' : String(v))));
+    },
+    async getValuesBatch(spreadsheetId, ranges) {
+      if (ranges.length === 0) return [];
+      const res = await sheets.spreadsheets.values.batchGet({
+        spreadsheetId,
+        ranges,
+        majorDimension: 'ROWS',
+        valueRenderOption: 'FORMATTED_VALUE',
+      });
+      return (res.data.valueRanges ?? []).map((r) =>
+        (r.values ?? []).map((row) => row.map((v) => (v === null || v === undefined ? '' : String(v)))),
+      );
     },
     async batchWrite(spreadsheetId, writes) {
       if (writes.length === 0) return;
@@ -323,6 +338,29 @@ export class GoogleSheetsService {
       trackingColumns: Object.values(snapshot.columns.tracking).map((i) => String(snapshot.headerNames[i] ?? '').trim()),
       missingTrackingColumns: snapshot.missingTrackingColumns,
     };
+  }
+
+  /**
+   * Every email address anywhere in the spreadsheet (all tabs, any column), lowercased.
+   * Used to keep people found by Find Contacts out when they are already in any tab.
+   */
+  async readAllEmails(): Promise<Set<string>> {
+    const meta = await this.call('metadata read', () => this.gateway.getSpreadsheet(this.target.spreadsheetId));
+    const titles = meta.sheets.map((s) => s.title);
+    const tabs = await this.call('read all tabs', () =>
+      this.gateway.getValuesBatch(this.target.spreadsheetId, titles.map((t) => quoteSheetName(t))),
+    );
+    const emails = new Set<string>();
+    for (const rows of tabs) {
+      for (const row of rows) {
+        for (const value of row) {
+          const text = String(value ?? '').trim().replace(/^mailto:/i, '');
+          if (text.includes('@') && isValidEmail(text)) emails.add(text.toLowerCase());
+        }
+      }
+    }
+    this.logger.info('google', `Read ${emails.size} email address(es) from ${titles.length} tab(s)`);
+    return emails;
   }
 
   /**
