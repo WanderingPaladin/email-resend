@@ -99,6 +99,8 @@ export const foundContactSchema = z.object({
 });
 
 export const finderSaveInputSchema = z.object({
+  /** 'new' creates the tab; 'existing' adds rows below the last row of that tab. */
+  mode: z.enum(['new', 'existing']).default('new'),
   // Google Sheets does not allow these characters in tab names.
   tabName: z
     .string()

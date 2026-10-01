@@ -63,6 +63,21 @@ export class FakeSheetsGateway implements SheetsGateway {
     return { sheet, cell: { col: letterToIndex(cell[1] ?? 'A'), row: Number(cell[2]) } };
   }
 
+  /** Rows of any tab: the main worksheet or one in `tabs`. */
+  private sheetRowsOf(sheet: string): string[][] {
+    if (sheet === this.worksheetName) return this.rows;
+    const tab = this.tabs.get(sheet);
+    if (!tab) throw Object.assign(new Error(`Unable to parse range: ${sheet}`), { response: { status: 400 } });
+    return tab;
+  }
+
+  rowRequests: { sheet: string; minRows: number }[] = [];
+
+  async ensureRowCount(_id: string, worksheetName: string, minRows: number): Promise<void> {
+    this.sheetRowsOf(worksheetName);
+    this.rowRequests.push({ sheet: worksheetName, minRows });
+  }
+
   private checkSheet(sheet: string) {
     if (sheet !== this.worksheetName) {
       throw Object.assign(new Error(`Unable to parse range: ${sheet}`), { response: { status: 400 } });
@@ -83,16 +98,28 @@ export class FakeSheetsGateway implements SheetsGateway {
     this.tabs.set(title, []);
   }
 
+  rowWrites: { sheet: string; startRow: number; rows: string[][] }[] = [];
+
   async writeRows(_id: string, range: string, rows: string[][]): Promise<void> {
     const { sheet, cell } = this.parse(range);
-    const tab = this.tabs.get(sheet);
-    if (!tab || cell?.col !== 0 || cell.row !== 1) throw new Error(`Unexpected writeRows range ${range}`);
-    tab.splice(0, tab.length, ...rows.map((r) => [...r]));
+    const target = this.sheetRowsOf(sheet);
+    if (!cell || cell.col !== 0) throw new Error(`Unexpected writeRows range ${range}`);
+    this.rowWrites.push({ sheet, startRow: cell.row, rows: rows.map((r) => [...r]) });
+    rows.forEach((values, i) => {
+      const rowIndex = cell.row - 1 + i;
+      while (target.length <= rowIndex) target.push([]);
+      const row = target[rowIndex] ?? [];
+      values.forEach((v, c) => {
+        while (row.length <= c) row.push('');
+        row[c] = v;
+      });
+      target[rowIndex] = row;
+    });
   }
 
   async ensureColumnCount(_id: string, worksheetName: string, minColumns: number): Promise<void> {
-    this.checkSheet(worksheetName);
-    if (this.columnCount < minColumns) {
+    this.sheetRowsOf(worksheetName);
+    if (worksheetName === this.worksheetName && this.columnCount < minColumns) {
       this.columnCount = minColumns;
       this.gridResizes++;
     }
@@ -102,8 +129,7 @@ export class FakeSheetsGateway implements SheetsGateway {
     this.beforeRead?.();
     this.reads++;
     const { sheet, headerOnly } = this.parse(range);
-    this.checkSheet(sheet);
-    const copy = this.rows.map((r) => [...r]);
+    const copy = this.sheetRowsOf(sheet).map((r) => [...r]);
     return headerOnly ? copy.slice(0, 1) : copy;
   }
 
@@ -125,19 +151,19 @@ export class FakeSheetsGateway implements SheetsGateway {
     this.writeBatches.push(writes);
     for (const w of writes) {
       const { sheet, cell } = this.parse(w.range);
-      this.checkSheet(sheet);
+      const target = this.sheetRowsOf(sheet);
       if (!cell) throw new Error('Only single-cell writes are expected');
-      if (cell.col >= this.columnCount) {
+      if (sheet === this.worksheetName && cell.col >= this.columnCount) {
         throw Object.assign(new Error(`Range exceeds grid limits. Max columns: ${this.columnCount}`), {
           response: { status: 400 },
         });
       }
       const rowIndex = cell.row - 1;
-      while (this.rows.length <= rowIndex) this.rows.push([]);
-      const row = this.rows[rowIndex] ?? [];
+      while (target.length <= rowIndex) target.push([]);
+      const row = target[rowIndex] ?? [];
       while (row.length <= cell.col) row.push('');
       row[cell.col] = w.value;
-      this.rows[rowIndex] = row;
+      target[rowIndex] = row;
     }
   }
 

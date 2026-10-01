@@ -40,6 +40,7 @@ const api: EmailAppApi = {
   finder: {
     validate: () => invoke(IPC.openaiValidate),
     search: (input) => invoke(IPC.finderSearch, input),
+    listTabs: () => invoke(IPC.finderTabs),
     save: (input) => invoke(IPC.finderSave, input),
     onProgress: (listener) => subscribe<FinderProgress>(IPC.finderProgress, listener),
   },

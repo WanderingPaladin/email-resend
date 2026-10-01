@@ -15,7 +15,8 @@ import {
 } from '../electron/services/contact-finder.service';
 import { GoogleSheetsService } from '../electron/services/google-sheets.service';
 import { redactText } from '../electron/services/log-format';
-import { finderTabRows, removeKnownEmails } from '../electron/ipc/finder.ipc';
+import { removeKnownEmails } from '../electron/ipc/finder.ipc';
+import { finderTabRows, planAppend } from '../electron/services/finder-sheet';
 import { FakeFetch, FakeSheetsGateway, MemoryLogger, noSleep, sheetRows } from './helpers';
 
 const raw = (email: string, extra: Partial<RawContact> = {}): RawContact => ({
@@ -279,5 +280,59 @@ describe('searching again until the requested number is found', () => {
   it('tells the model which emails to leave out', () => {
     expect(buildSearchInput('HR', 2, ['a@x.com'])).toContain('Do not include them');
     expect(buildSearchInput('HR', 2)).not.toContain('Do not include');
+  });
+});
+
+describe('adding found contacts to an existing tab', () => {
+  const found = (name: string, email: string) => ({
+    name,
+    email,
+    organization: 'Acme',
+    role: 'HR',
+    sourceUrl: `https://acme.com/${email}`,
+    emailOnPage: 'yes' as const,
+  });
+  const service = (gateway: FakeSheetsGateway) =>
+    new GoogleSheetsService(gateway, { spreadsheetId: 's', worksheetName: 'Emails', serviceAccountEmail: '' }, new MemoryLogger(), { sleepFn: noSleep });
+
+  it("uses the tab's own headers and adds only the missing Source URL column", async () => {
+    const gateway = new FakeSheetsGateway([
+      ['Name', 'Email', 'Location', 'Country', 'Role / Profile', 'Batch Flag', 'send_status'],
+      ['Ana Lopez', 'ana@x.com', 'Austin', 'US', 'CTO', 'Sent', 'sent'],
+      ['Bo Chen', 'bo@x.com', '', '', '', 'New', ''],
+    ]);
+    const sheets = service(gateway);
+    const plan = planAppend(await sheets.readWorksheet('Emails'), [found('Cy Diaz', 'cy@x.com'), found('Dee Eng', 'dee@x.com')]);
+    const saved = await sheets.appendToWorksheet('Emails', plan);
+    expect(saved).toEqual({ tabName: 'Emails', rows: 2, addedColumns: ['Source URL'] });
+    expect(gateway.rows[0]).toEqual(['Name', 'Email', 'Location', 'Country', 'Role / Profile', 'Batch Flag', 'send_status', 'Source URL']);
+    // Existing rows are untouched; new rows start below the last one, Batch Flag empty.
+    expect(gateway.rows[1]).toEqual(['Ana Lopez', 'ana@x.com', 'Austin', 'US', 'CTO', 'Sent', 'sent']);
+    expect(gateway.rows[3]).toEqual(['Cy Diaz', 'cy@x.com', '', '', 'HR', '', '', 'https://acme.com/cy@x.com']);
+    expect(gateway.rows[4]?.[1]).toBe('dee@x.com');
+    expect(gateway.rowWrites[0]?.startRow).toBe(4);
+  });
+
+  it('splits the name for First/Last Name columns and adds missing Email and Batch Flag columns', () => {
+    const plan = planAppend([['First Name', 'Last Name', 'Company', 'Notes']], [found('Ana Maria Lopez', 'ana@x.com')]);
+    expect(plan.addedColumns).toEqual([
+      { index: 4, label: 'Email' },
+      { index: 5, label: 'Batch Flag' },
+      { index: 6, label: 'Source URL' },
+    ]);
+    expect(plan.rows[0]).toEqual(['Ana', 'Maria Lopez', 'Acme', '', 'ana@x.com', '', 'https://acme.com/ana@x.com']);
+    expect(plan.firstRow).toBe(2);
+  });
+
+  it('never places a new column over data that has no header', () => {
+    const plan = planAppend([['Name', 'Email'], ['A', 'a@x.com', 'stray note']], [found('B', 'b@x.com')]);
+    expect(plan.addedColumns.map((c) => c.index)).toEqual([3, 4]);
+    expect(plan.firstRow).toBe(3);
+  });
+
+  it('accepts the existing mode in the save input', () => {
+    const input = finderSaveInputSchema.parse({ mode: 'existing', tabName: 'Emails', contacts: [found('A', 'a@x.com')] });
+    expect(input.mode).toBe('existing');
+    expect(finderSaveInputSchema.parse({ tabName: 'X', contacts: [found('A', 'a@x.com')] }).mode).toBe('new');
   });
 });

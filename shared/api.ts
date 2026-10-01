@@ -45,7 +45,9 @@ export interface EmailAppApi {
     /** Checks the OpenAI key and model without running a search. */
     validate(): Promise<{ message: string }>;
     search(input: FinderSearchInput): Promise<FinderSearchResult>;
-    /** Creates a new tab in the spreadsheet with the given contacts. */
+    /** Tab names of the spreadsheet, for choosing where to save. */
+    listTabs(): Promise<string[]>;
+    /** Saves the contacts to a new tab, or below the last row of an existing tab. */
     save(input: FinderSaveInput): Promise<FinderSaveResult>;
     /** Progress of a running search (one event per search round). */
     onProgress(listener: (progress: FinderProgress) => void): Unsubscribe;

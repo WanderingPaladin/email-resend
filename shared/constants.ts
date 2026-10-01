@@ -103,6 +103,7 @@ export const IPC = {
   openaiValidate: 'openai:validate',
   finderSearch: 'finder:search',
   finderSave: 'finder:save',
+  finderTabs: 'finder:tabs',
   finderProgress: 'finder:progress',
 
   campaignSendTest: 'campaign:send-test',

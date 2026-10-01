@@ -41,6 +41,8 @@ export interface SheetsGateway {
   batchWrite(spreadsheetId: string, writes: CellWrite[]): Promise<void>;
   /** Adds columns to the worksheet's grid until it has at least `minColumns`. Google rejects writes outside the grid. */
   ensureColumnCount(spreadsheetId: string, worksheetName: string, minColumns: number): Promise<void>;
+  /** Adds rows to the worksheet's grid until it has at least `minRows`. */
+  ensureRowCount(spreadsheetId: string, worksheetName: string, minRows: number): Promise<void>;
   /** Adds a new, empty tab. */
   addWorksheet(spreadsheetId: string, title: string, rowCount: number, columnCount: number): Promise<void>;
   /** Writes a block of rows starting at `range` (e.g. 'Tab'!A1). */
@@ -120,6 +122,20 @@ export function createSheetsClient(credentials: GoogleCredentials, fetchImplemen
         requestBody: {
           requests: [{ appendDimension: { sheetId: props.sheetId, dimension: 'COLUMNS', length: minColumns - columnCount } }],
         },
+      });
+    },
+    async ensureRowCount(spreadsheetId, worksheetName, minRows) {
+      const res = await sheets.spreadsheets.get({
+        spreadsheetId,
+        fields: 'sheets.properties.sheetId,sheets.properties.title,sheets.properties.gridProperties.rowCount',
+      });
+      const props = (res.data.sheets ?? []).find((s) => s.properties?.title === worksheetName)?.properties;
+      if (props?.sheetId === undefined || props.sheetId === null) return;
+      const rowCount = props.gridProperties?.rowCount ?? 0;
+      if (rowCount >= minRows) return;
+      await sheets.spreadsheets.batchUpdate({
+        spreadsheetId,
+        requestBody: { requests: [{ appendDimension: { sheetId: props.sheetId, dimension: 'ROWS', length: minRows - rowCount } }] },
       });
     },
     async addWorksheet(spreadsheetId, title, rowCount, columnCount) {
@@ -386,6 +402,47 @@ export class GoogleSheetsService {
     await this.call('write new tab', () => this.gateway.writeRows(this.target.spreadsheetId, `${quoteSheetName(title)}!A1`, rows));
     this.logger.info('google', `Created tab "${title}" with ${rows.length - 1} row(s)`);
     return { tabName: title, rows: rows.length - 1 };
+  }
+
+  /** Tab names, in the spreadsheet's order. */
+  async listWorksheets(): Promise<string[]> {
+    const meta = await this.call('metadata read', () => this.gateway.getSpreadsheet(this.target.spreadsheetId));
+    return meta.sheets.map((s) => s.title);
+  }
+
+  /** All values of a tab (the header row first). Empty when the tab is blank. */
+  async readWorksheet(title: string): Promise<string[][]> {
+    const titles = await this.listWorksheets();
+    if (!titles.includes(title)) throw new GoogleSheetsError(`Tab "${title}" was not found in the spreadsheet.`, 'worksheet_not_found');
+    return this.call('read tab', () => this.gateway.getValues(this.target.spreadsheetId, quoteSheetName(title)));
+  }
+
+  /**
+   * Writes new rows below the last row in use of an existing tab, adding header cells for new
+   * columns at the right. Existing cells are never written.
+   */
+  async appendToWorksheet(
+    title: string,
+    plan: { addedColumns: { index: number; label: string }[]; rows: string[][]; firstRow: number; width: number },
+  ): Promise<{ tabName: string; rows: number; addedColumns: string[] }> {
+    const id = this.target.spreadsheetId;
+    const lastRow = plan.firstRow + plan.rows.length - 1;
+    await this.call('grid resize', () => this.gateway.ensureColumnCount(id, title, plan.width));
+    await this.call('grid resize', () => this.gateway.ensureRowCount(id, title, lastRow));
+    if (plan.addedColumns.length > 0) {
+      await this.call('header write', () =>
+        this.gateway.batchWrite(
+          id,
+          plan.addedColumns.map((c) => ({ range: `${quoteSheetName(title)}!${columnToLetter(c.index)}1`, value: c.label })),
+        ),
+      );
+    }
+    await this.call('append rows', () => this.gateway.writeRows(id, `${quoteSheetName(title)}!A${plan.firstRow}`, plan.rows));
+    this.logger.info('google', `Added ${plan.rows.length} row(s) to tab "${title}"`, {
+      firstRow: plan.firstRow,
+      addedColumns: plan.addedColumns.map((c) => c.label).join(','),
+    });
+    return { tabName: title, rows: plan.rows.length, addedColumns: plan.addedColumns.map((c) => c.label) };
   }
 
   async getHeaders(): Promise<string[]> {

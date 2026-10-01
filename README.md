@@ -157,8 +157,13 @@ saves them to a new tab of your spreadsheet.
    asked for (up to 100 per run; each search asks for at most 25 people). It allows enough searches
    for your number plus 4 extra to replace skipped ones (20 people: 5 searches, 100 people: 8), stops
    early after 2 searches in a row that find nobody new, and says how many it found. Each search uses OpenAI credits.
-4. Pick a tab name and click **Save to New Tab**. The new tab has Name, Email, Organization, Role,
-   Source URL, Email on page, Batch Flag and the tracking columns. Existing tabs are never overwritten.
+4. Choose where to save:
+   - **New tab**: enter a name. The tab gets Name, Email, Organization, Role, Source URL, Email on
+     page, Batch Flag and the tracking columns. An existing tab is never overwritten.
+   - **Existing tab** (any tab, including your Emails tab): rows are added below the last row in use,
+     placed by that tab's own headers (Name or First Name/Last Name, Email; Organization/Company, Role
+     and Email on page when the tab has them). Missing Name, Email, Batch Flag or Source URL columns
+     are added at the right. Existing rows and columns are never changed or reordered.
 
 Batch Flag is left **empty**, so nothing is sent to found contacts until you review them. Set Batch
 Flag to `New` only for people you are authorized to email, then either choose that tab as the

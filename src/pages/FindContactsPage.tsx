@@ -5,7 +5,7 @@ import type { PageId } from '@/components/AppSidebar';
 import { Alert, Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { Field, Input, Textarea } from '@/components/ui/form';
+import { Field, Input, Select, Textarea } from '@/components/ui/form';
 import { api, errorMessage } from '@/lib/utils';
 
 const ON_PAGE: Record<FoundContact['emailOnPage'], { label: string; tone: 'success' | 'warning' | 'neutral'; title: string }> = {
@@ -42,6 +42,9 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
   const googleReady = Boolean(config?.settings.spreadsheetId && config.settings.serviceAccountEmail && config.hasGooglePrivateKey);
   const chosen = useMemo(() => result?.contacts.filter((c) => selected.has(c.email)) ?? [], [result, selected]);
 
+  /** '' means a new tab; otherwise the name of an existing tab to add rows to. */
+  const [destination, setDestination] = useState('');
+  const [tabs, setTabs] = useState<string[]>([]);
   const [progress, setProgress] = useState<FinderProgress | null>(null);
   useEffect(() => api().finder.onProgress(setProgress), []);
 
@@ -76,18 +79,38 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
     }
   };
 
+  const loadTabs = async () => {
+    try {
+      setTabs(await api().finder.listTabs());
+    } catch {
+      setTabs([]);
+    }
+  };
+  useEffect(() => {
+    if (result && result.contacts.length > 0 && googleReady) void loadTabs();
+  }, [result, googleReady]);
+
   const save = async () => {
     setSaving(true);
     setMessage(null);
     try {
-      const saved = await api().finder.save({ tabName, contacts: chosen });
+      const saved = await api().finder.save(
+        destination ? { mode: 'existing', tabName: destination, contacts: chosen } : { mode: 'new', tabName, contacts: chosen },
+      );
+      void loadTabs();
       const skipped = [
         saved.skippedExisting && `${saved.skippedExisting} already in the spreadsheet`,
         saved.skippedDuplicate && `${saved.skippedDuplicate} repeated`,
       ].filter(Boolean);
       setMessage({
         tone: 'success',
-        text: `Saved ${saved.rows} contact(s) to the new tab "${saved.tabName}".${skipped.length ? ` Skipped ${skipped.join(' and ')}.` : ''} Their Batch Flag is empty: set it to New for each contact you are authorized to email, then choose that tab in Settings (or copy the rows into your Emails tab) to send.`,
+        text:
+          (saved.mode === 'new'
+            ? `Saved ${saved.rows} contact(s) to the new tab "${saved.tabName}".`
+            : `Added ${saved.rows} contact(s) below the last row of "${saved.tabName}".`) +
+          (saved.addedColumns.length && saved.mode === 'existing' ? ` Added column(s): ${saved.addedColumns.join(', ')}.` : '') +
+          (skipped.length ? ` Skipped ${skipped.join(' and ')}.` : '') +
+          ' Their Batch Flag is empty: set it to New for each contact you are authorized to email before sending.',
       });
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
@@ -225,12 +248,33 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
               </table>
             </div>
             <div className="flex items-end gap-3">
-              <Field label="New tab name" className="w-72">
-                <Input value={tabName} onChange={(e) => setTabName(e.target.value)} />
+              <Field label="Save to" className="w-64">
+                <Select value={destination} onChange={(e) => setDestination(e.target.value)}>
+                  <option value="">New tab…</option>
+                  {tabs.map((t) => (
+                    <option key={t} value={t}>
+                      {`Existing tab: ${t}`}
+                    </option>
+                  ))}
+                </Select>
               </Field>
-              <Button loading={saving} disabled={!googleReady || chosen.length === 0 || !tabName.trim()} onClick={() => void save()}>
-                Save {chosen.length} to New Tab
+              {!destination && (
+                <Field label="New tab name" className="w-72">
+                  <Input value={tabName} onChange={(e) => setTabName(e.target.value)} />
+                </Field>
+              )}
+              <Button
+                loading={saving}
+                disabled={!googleReady || chosen.length === 0 || (!destination && !tabName.trim())}
+                onClick={() => void save()}
+              >
+                {destination ? `Add ${chosen.length} to "${destination}"` : `Save ${chosen.length} to New Tab`}
               </Button>
+            </div>
+            <div className="text-xs text-slate-500">
+              {destination
+                ? 'Rows are added below the last row, matched to the tab’s own headers (Name or First/Last Name, Email). Missing Name, Email, Batch Flag or Source URL columns are added at the right. Existing rows are never changed.'
+                : 'A new tab is created with Name, Email, Organization, Role, Source URL, Email on page, Batch Flag and the tracking columns.'}
             </div>
           </CardBody>
         </Card>

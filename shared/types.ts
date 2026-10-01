@@ -310,8 +310,11 @@ export interface FinderProgress {
 }
 
 export interface FinderSaveResult {
+  mode: 'new' | 'existing';
   tabName: string;
   rows: number;
+  /** Columns added to the right of an existing tab's headers (e.g. Source URL). */
+  addedColumns: string[];
   /** Selected contacts left out because their email is already in some tab of the spreadsheet. */
   skippedExisting: number;
   /** Selected contacts left out because the same email was selected twice. */
