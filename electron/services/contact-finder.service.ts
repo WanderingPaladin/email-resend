@@ -278,8 +278,16 @@ export class ContactFinder {
   }
 }
 
-/** How many searches Find Contacts runs at most to reach the requested number. */
-export const MAX_SEARCH_ROUNDS = 5;
+/** Most people asked for in one search; larger requests are split over several searches. */
+export const PER_SEARCH_LIMIT = 25;
+
+/**
+ * Searches allowed to reach `target`: enough for the target at PER_SEARCH_LIMIT each, plus 4 to
+ * replace skipped results. 20 → 5 searches, 50 → 6, 100 → 8.
+ */
+export function maxRoundsFor(target: number): number {
+  return Math.ceil(target / PER_SEARCH_LIMIT) + 4;
+}
 
 export interface FinderRoundProgress {
   round: number;
@@ -293,7 +301,8 @@ type Searcher = Pick<ContactFinder, 'search' | 'checkOnPage'>;
 /**
  * Searches repeatedly until `target` usable contacts are found. Results that are invalid, repeated,
  * already in the spreadsheet or not on their source page do not count, and the next round asks for
- * the missing number while excluding every email seen so far. Stops after `maxRounds`, or after two
+ * the missing number (at most PER_SEARCH_LIMIT at a time) while excluding every email seen so far.
+ * Stops after `maxRounds`, or after two
  * rounds in a row that add nobody.
  */
 export async function findUntilTarget(
@@ -303,7 +312,7 @@ export async function findUntilTarget(
   existing: ReadonlySet<string>,
   options: { maxRounds?: number; onProgress?: (p: FinderRoundProgress) => void; logger?: AppLogger } = {},
 ): Promise<Omit<FinderSearchResult, 'checkedAgainstSheet'>> {
-  const maxRounds = options.maxRounds ?? MAX_SEARCH_ROUNDS;
+  const maxRounds = options.maxRounds ?? maxRoundsFor(target);
   const accepted: FoundContact[] = [];
   const notOnPage: FoundContact[] = [];
   const dropped = { invalid: 0, noSource: 0, duplicate: 0, alreadyInSheet: 0, notOnPage: 0 };
@@ -314,7 +323,7 @@ export async function findUntilTarget(
 
   while (accepted.length < target && rounds < maxRounds) {
     rounds++;
-    const need = target - accepted.length;
+    const need = Math.min(target - accepted.length, PER_SEARCH_LIMIT);
     let raw: RawContact[];
     try {
       raw = await finder.search(query, need, [...seen]);

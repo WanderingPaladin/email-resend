@@ -51,7 +51,9 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
     setResult(null);
     setProgress(null);
     try {
-      const count = Math.min(MAX_FINDER_RESULTS, Math.max(1, Math.round(Number(maxResults)) || 20));
+      const requested = Math.round(Number(maxResults)) || 20;
+      const count = Math.min(MAX_FINDER_RESULTS, Math.max(1, requested));
+      if (count !== requested) setMaxResults(String(count));
       const next = await api().finder.search({ query, maxResults: count });
       setResult(next);
       // Pre-select the contacts that count toward the target; emails missing from their page stay unselected.
@@ -139,7 +141,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
             <Textarea rows={3} value={query} onChange={(e) => setQuery(e.target.value)} disabled={searching} />
           </Field>
           <div className="flex items-end gap-3">
-            <Field label="Maximum results" className="w-40">
+            <Field label={`Number of people (up to ${MAX_FINDER_RESULTS})`} className="w-56">
               <Input type="number" min={1} max={MAX_FINDER_RESULTS} value={maxResults} onChange={(e) => setMaxResults(e.target.value)} disabled={searching} />
             </Field>
             <Button loading={searching} disabled={!hasKey || query.trim().length < 3} onClick={() => void search()}>
@@ -155,7 +157,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
           </div>
           <p className="text-xs text-slate-500">
             If some results are skipped (already in your spreadsheet, repeated, invalid, or not on their page), the app searches again
-            for the rest, up to 5 times. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
+            for the rest until it reaches your number (up to 100), or stops and tells you how many it found. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
             them and set Batch Flag to New.
           </p>
         </CardBody>

@@ -6,6 +6,7 @@ import {
   cleanFoundContacts,
   ContactFinder,
   findUntilTarget,
+  maxRoundsFor,
   isPublicWebUrl,
   normalizePageText,
   parseContactsJson,
@@ -161,7 +162,8 @@ describe('saving results to a new tab', () => {
     expect(finderSaveInputSchema.safeParse({ tabName: 'Bad/Name', contacts }).success).toBe(false);
     expect(finderSaveInputSchema.safeParse({ tabName: 'Good', contacts: [] }).success).toBe(false);
     expect(finderSaveInputSchema.safeParse({ tabName: 'Good', contacts }).success).toBe(true);
-    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 51 }).success).toBe(false);
+    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 101 }).success).toBe(false);
+    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 100 }).success).toBe(true);
     expect(finderSearchInputSchema.parse({ query: 'HR managers' }).maxResults).toBe(20);
   });
 
@@ -247,6 +249,31 @@ describe('searching again until the requested number is found', () => {
     expect(partial.found).toBe(1);
     expect(partial.warning).toContain('rate limit');
     await expect(findUntilTarget(fakeSearcher([]), 'HR', 5, new Set())).rejects.toThrow('rate limit');
+  });
+
+  it('reaches 100 by asking for at most 25 per search, with extra searches for skipped results', async () => {
+    let n = 0;
+    const batch = (size: number) => Array.from({ length: size }, () => raw(`p${++n}@x.com`));
+    // Every search returns what was asked, but a fifth of each batch is already in the sheet.
+    const existing = new Set<string>();
+    const searcher = {
+      needs: [] as number[],
+      search: async (_q: string, need: number) => {
+        searcher.needs.push(need);
+        const found = batch(need);
+        found.slice(0, Math.floor(need / 5)).forEach((c) => existing.add(c.email));
+        return found;
+      },
+      checkOnPage: async (contacts: readonly RawContact[]) => contacts.map((c) => ({ ...c, emailOnPage: 'yes' as const })),
+    };
+    const result = await findUntilTarget(searcher, 'HR', 100, existing);
+    expect(maxRoundsFor(20)).toBe(5);
+    expect(maxRoundsFor(100)).toBe(8);
+    expect(Math.max(...searcher.needs)).toBe(25);
+    expect(result).toMatchObject({ found: 100, target: 100 });
+    expect(result.contacts).toHaveLength(100);
+    expect(searcher.needs.slice(0, 4)).toEqual([25, 25, 25, 25]);
+    expect(result.dropped.alreadyInSheet).toBe(searcher.needs.reduce((sum, need) => sum + Math.floor(need / 5), 0));
   });
 
   it('tells the model which emails to leave out', () => {
