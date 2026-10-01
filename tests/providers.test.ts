@@ -75,6 +75,13 @@ describe('Elastic Email', () => {
     const bad = new FakeFetch().reply(401, { Error: 'Access denied' });
     await expect(service(bad).validateConfiguration('julio@example.com')).rejects.toThrow(/rejected the API key/);
   });
+
+  it('matches a domain listed with its default sender, e.g. "example.org (hi@example.org)"', async () => {
+    const f = new FakeFetch().reply(200, [{ Domain: 'LeanSolutionsGroup.org (hi@leansolutionsgroup.org)', Spf: true, Dkim: true }]);
+    const result = await service(f).validateConfiguration(' hi@leansolutionsgroup.org ');
+    expect(result).toMatchObject({ verifiedDomains: ['leansolutionsgroup.org'], fromDomainVerified: true });
+    expect(result.message).not.toContain('not verified');
+  });
 });
 
 describe('Mailjet', () => {

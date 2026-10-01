@@ -8,6 +8,7 @@ import {
   httpError,
   mailerError,
   networkError,
+  normalizeDomain,
   readJson,
   REQUEST_TIMEOUT_MS,
   type AttemptResult,
@@ -112,8 +113,9 @@ export class ElasticEmailService extends BaseMailer {
     const domains = Array.isArray(body) ? (body as { Domain?: unknown; Spf?: unknown; Dkim?: unknown }[]) : [];
     const verified = domains
       .filter((d) => typeof d.Domain === 'string' && d.Spf === true && d.Dkim === true)
-      .map((d) => String(d.Domain).toLowerCase());
-    const fromDomain = fromEmail.split('@')[1]?.toLowerCase() ?? '';
+      .map((d) => normalizeDomain(String(d.Domain)))
+      .filter(Boolean);
+    const fromDomain = fromEmail.trim().split('@')[1]?.trim().toLowerCase() ?? '';
     const fromDomainVerified = fromDomain ? verified.some((d) => domainMatches(fromEmail, d)) : null;
     let message = `API key is valid. Domains with SPF and DKIM verified: ${verified.join(', ') || 'none'}.`;
     if (fromDomainVerified === false) message += ` The From address domain "${fromDomain}" is not verified in Elastic Email.`;

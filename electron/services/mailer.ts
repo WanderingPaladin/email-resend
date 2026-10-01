@@ -143,9 +143,19 @@ export abstract class BaseMailer implements Mailer {
 }
 
 /** True when `email`'s domain equals `domain` or is a subdomain of it. */
+/**
+ * The bare domain from a provider's domain label. Elastic Email can return labels such as
+ * "example.com (hi@example.com)", which must not be compared as a whole.
+ */
+export function normalizeDomain(label: string): string {
+  const head = label.split('(')[0] ?? '';
+  const host = head.includes('@') ? head.slice(head.lastIndexOf('@') + 1) : head;
+  return host.trim().replace(/\.$/, '').toLowerCase();
+}
+
 export function domainMatches(email: string, domain: string): boolean {
-  const from = email.split('@')[1]?.toLowerCase() ?? '';
-  const d = domain.toLowerCase();
+  const from = email.trim().split('@')[1]?.trim().replace(/\.$/, '').toLowerCase() ?? '';
+  const d = normalizeDomain(domain);
   return Boolean(from) && (from === d || from.endsWith(`.${d}`));
 }
 
