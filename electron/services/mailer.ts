@@ -1,5 +1,6 @@
 import type { MailerValidationResult } from '../../shared/types';
 import type { AppLogger } from '../types/logger';
+import { emailSchema } from '../../shared/schemas';
 import { maskEmail } from './log-format';
 import { sleep } from './retry';
 
@@ -109,6 +110,17 @@ export abstract class BaseMailer implements Mailer {
   }
 
   async sendEmail(email: OutgoingEmail): Promise<SendResult> {
+    // Last line of defence: a blank or malformed recipient never reaches the provider.
+    if (!emailSchema.safeParse(email.to.trim()).success || email.to !== email.to.trim()) {
+      this.logger.warn('resend', 'Email not sent: invalid recipient address', { to: maskEmail(email.to) });
+      return {
+        success: false,
+        error: email.to.trim() ? 'Invalid email address; nothing was sent.' : 'Blank email address; nothing was sent.',
+        code: 'invalid_recipient',
+        ambiguous: false,
+        fatal: false,
+      };
+    }
     const maxAttempts = this.options.maxAttempts ?? 4;
     const idempotent = this.supportsIdempotency && Boolean(email.idempotencyKey);
     let last: MailerError | null = null;

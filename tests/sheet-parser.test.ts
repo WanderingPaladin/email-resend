@@ -128,6 +128,14 @@ describe('contact selection', () => {
     expect(result.totalNew).toBe(2);
   });
 
+  it('skips every malformed email and never selects it', () => {
+    const bad = ['n/a', '#N/A', 'ana@acme', 'ana @acme.com', 'a@x.com; b@y.com', 'Ana <ana@acme.com>', 'mailto:ana@acme.com', 'ana@acme..com', 'ana@acme.com.'];
+    const { contacts } = parseContacts(rows(headers, [...bad.map((e) => contact(e)), contact('ok@example.com')]));
+    const result = selectContacts(contacts, 100);
+    expect(result.selected.map((c) => c.email)).toEqual(['ok@example.com']);
+    expect(result.skipped.map((s) => s.reason)).toEqual(bad.map(() => 'invalid_email'));
+  });
+
   it('blank-email rows do not use up the batch', () => {
     const { contacts } = parseContacts(rows(headers, [contact(''), contact(''), contact('a@example.com'), contact('b@example.com')]));
     expect(selectContacts(contacts, 2).selected.map((c) => c.email)).toEqual(['a@example.com', 'b@example.com']);

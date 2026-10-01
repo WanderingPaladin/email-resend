@@ -16,6 +16,15 @@ describe('ResendService.sendEmail', () => {
     expect(client.calls[0]).toMatchObject({ to: 'maria@example.com', from: 'Julio <julio@example.com>', html: '<p>Hi</p>' });
   });
 
+  it('never calls the provider for a blank or malformed recipient', async () => {
+    const client = new FakeResendClient();
+    for (const to of ['', '   ', 'n/a', 'ana@acme', 'ana @acme.com', 'a@x.com; b@y.com', 'Ana <ana@acme.com>', 'mailto:ana@acme.com', ' ana@acme.com']) {
+      const result = await service(client).sendEmail({ ...email, to });
+      expect(result).toMatchObject({ success: false, code: 'invalid_recipient', ambiguous: false });
+    }
+    expect(client.calls).toHaveLength(0);
+  });
+
   it('normalizes a validation failure and does not retry it', async () => {
     const client = new FakeResendClient();
     client.script('maria@example.com', { error: { name: 'validation_error', message: 'Invalid `to` field', statusCode: 422 } });
