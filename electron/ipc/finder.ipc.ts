@@ -1,11 +1,12 @@
+import { randomUUID } from 'node:crypto';
 import { IPC } from '../../shared/constants';
-import { finderSaveInputSchema, finderSearchInputSchema } from '../../shared/schemas';
-import type { FinderProgress, FinderRunCost, FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
+import { finderOpenSavedInputSchema, finderSaveInputSchema, finderSearchInputSchema } from '../../shared/schemas';
+import type { FinderProgress, FinderRunCost, FinderRunState, FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
 import { estimateCost } from '../../shared/usage';
 import type { AppContext } from '../app-context';
 import { findUntilTarget } from '../services/contact-finder.service';
 import { finderTabRows, planAppend } from '../services/finder-sheet';
-import { FinderUsageLog } from '../services/finder-usage.service';
+import { FinderResultStore, FinderUsageLog } from '../services/finder-usage.service';
 import { broadcast, handle, type IpcDeps } from './handle';
 
 /** Layout for a blank existing tab: header in row 1, contacts below. */
@@ -45,10 +46,23 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
 
   // The running search, so Cancel can stop it. Only one search runs at a time.
   let running: AbortController | null = null;
+  // The running or last search, kept here so the page can show it again after the user switches pages.
+  let current: FinderRunState | null = null;
+
+  const usageLog = new FinderUsageLog(ctx.repo);
+  const savedSearches = new FinderResultStore(ctx.repo);
 
   handle(deps, IPC.finderCancel, null, () => {
     running?.abort();
     return Boolean(running);
+  });
+
+  handle(deps, IPC.finderState, null, () => current);
+  handle(deps, IPC.finderRecent, null, () => savedSearches.list());
+  handle(deps, IPC.finderOpenSaved, finderOpenSavedInputSchema, ({ id }) => {
+    const saved = savedSearches.get(id);
+    if (!saved) throw new Error('That search is no longer saved.');
+    return saved;
   });
 
   handle(deps, IPC.finderSearch, finderSearchInputSchema, async ({ query, maxResults }): Promise<FinderSearchResult> => {
@@ -56,14 +70,31 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
     const finder = ctx.createFinder();
     const controller = new AbortController();
     running = controller;
+    const run: FinderRunState = { id: randomUUID(), query, maxResults, startedAt: new Date().toISOString(), running: true, progress: null };
+    current = run;
     try {
-      return await runSearch(finder, query, maxResults, controller.signal);
+      const result = await runSearch(run, finder, controller.signal);
+      run.result = result;
+      if (result.contacts.length > 0) {
+        try {
+          savedSearches.add({ id: run.id, at: new Date().toISOString(), query, result });
+        } catch (error) {
+          ctx.logger.warn('finder', 'Could not keep the search results for later', {
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+      return result;
+    } catch (error) {
+      run.error = error instanceof Error ? error.message : String(error);
+      throw error;
     } finally {
+      run.running = false;
       running = null;
+      broadcast(IPC.finderDone, run);
     }
   });
 
-  const usageLog = new FinderUsageLog(ctx.repo);
   handle(deps, IPC.finderUsage, null, () => usageLog.list());
   handle(deps, IPC.finderUsageClear, null, () => {
     usageLog.clear();
@@ -72,11 +103,11 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
   });
 
   const runSearch = async (
+    run: FinderRunState,
     finder: ReturnType<AppContext['createFinder']>,
-    query: string,
-    maxResults: number,
     signal: AbortSignal,
   ): Promise<FinderSearchResult> => {
+    const { query, maxResults } = run;
     const costSoFar = (): FinderRunCost => {
       const usage = finder.usage();
       const { cost, complete } = estimateCost(finder.model, usage);
@@ -105,6 +136,7 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
         signal,
         onProgress: (progress) => {
           last = { ...progress, estimatedCost: costSoFar().estimatedCost };
+          run.progress = last;
           broadcast(IPC.finderProgress, last);
         },
       });
@@ -120,18 +152,21 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
       const cost = costSoFar();
       if (cost.usage.requests > 0) {
         const seen = last as FinderProgress | null;
-        usageLog.add({
-          at: new Date().toISOString(),
-          query,
-          model: cost.model,
-          target: maxResults,
-          found: outcome?.found ?? seen?.found ?? 0,
-          rounds: outcome?.rounds ?? seen?.round ?? cost.usage.requests,
-          stopped: outcome?.stopped ?? (signal.aborted ? 'cancelled' : 'error'),
-          usage: cost.usage,
-          estimatedCost: cost.estimatedCost,
-          priceKnown: cost.priceKnown,
-        });
+        usageLog.add(
+          {
+            at: new Date().toISOString(),
+            query,
+            model: cost.model,
+            target: maxResults,
+            found: outcome?.found ?? seen?.found ?? 0,
+            rounds: outcome?.rounds ?? seen?.round ?? cost.usage.requests,
+            stopped: outcome?.stopped ?? (signal.aborted ? 'cancelled' : 'error'),
+            usage: cost.usage,
+            estimatedCost: cost.estimatedCost,
+            priceKnown: cost.priceKnown,
+          },
+          run.id,
+        );
       }
     }
   };

@@ -83,6 +83,8 @@ export const saveConfigInputSchema = z.object({
   googlePrivateKey: secretInput,
 });
 
+export const finderOpenSavedInputSchema = z.object({ id: z.string().min(1).max(100) });
+
 export const finderSearchInputSchema = z.object({
   query: z.string().trim().min(3, 'Describe who to look for.').max(1000),
   maxResults: z.number().int().min(1).max(MAX_FINDER_RESULTS).default(20),

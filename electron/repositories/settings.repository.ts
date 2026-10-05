@@ -1,6 +1,6 @@
 import Store from 'electron-store';
 import type { Settings } from '../../shared/schemas';
-import type { CampaignHistoryEntry, ManualReviewItem } from '../../shared/types';
+import type { CampaignHistoryEntry, ManualReviewItem, SavedFinderSearch } from '../../shared/types';
 import type { FinderUsageRecord } from '../../shared/usage';
 
 /** Encrypted secrets, stored as base64 of safeStorage ciphertext. Never plain text. */
@@ -27,6 +27,8 @@ export interface StoreSchema {
   activeCampaign: ActiveCampaignMarker | null;
   /** One entry per Find Contacts run with its estimated OpenAI cost, oldest first. */
   finderUsage: FinderUsageRecord[];
+  /** Results of the latest Find Contacts searches, oldest first. */
+  finderResults: SavedFinderSearch[];
 }
 
 /** Small persistence abstraction so services can be tested without Electron. */
@@ -42,6 +44,7 @@ const DEFAULTS: StoreSchema = {
   manualReview: [],
   activeCampaign: null,
   finderUsage: [],
+  finderResults: [],
 };
 
 /** electron-store writes JSON atomically to <userData>/settings.json. */

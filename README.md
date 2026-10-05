@@ -167,6 +167,11 @@ saves them to a new tab of your spreadsheet.
      and Email on page when the tab has them). Missing Name, Email, Batch Flag or Source URL columns
      are added at the right. Existing rows and columns are never changed or reordered.
 
+The search runs in the background, so you can switch to other pages while it works: when you come
+back, Find Contacts shows its progress, or its results once it has finished. The results of your
+latest 30 searches are also kept on this computer under **Recent searches**, so you can open one
+again (even after restarting the app) and save it to the sheet later.
+
 Batch Flag is left **empty**, so nothing is sent to found contacts until you review them. Set Batch
 Flag to `New` only for people you are authorized to email, then either choose that tab as the
 worksheet in Settings or copy the rows into your Emails tab.
@@ -224,7 +229,7 @@ All paths are inside Electron's user-data folder (`%APPDATA%\Email Sender` on Wi
 
 | Path | Contents |
 | --- | --- |
-| `settings.json` | Non-secret settings, campaign history, search cost history, encrypted credentials (ciphertext only) |
+| `settings.json` | Non-secret settings, campaign history, search cost history, recent search results, encrypted credentials (ciphertext only) |
 | `logs/main.log` | All log entries (rotates to `main.old.log` at 5 MB) |
 | `logs/campaign.log` | Campaign entries only |
 | `journal/<campaign-id>.jsonl` | Per-contact send outcomes used for crash recovery (emails masked) |

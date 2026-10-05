@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import { ContactFinder, responseUsage } from '../electron/services/contact-finder.service';
-import { FinderUsageLog, MAX_USAGE_RECORDS } from '../electron/services/finder-usage.service';
+import { FinderResultStore, FinderUsageLog, MAX_SAVED_SEARCHES, MAX_USAGE_RECORDS } from '../electron/services/finder-usage.service';
+import type { FinderSearchResult } from '../shared/types';
 import { createMemorySettingsRepository } from '../electron/repositories/settings.repository';
 import { currentTotal, estimateCost, formatUsd, periodStart, priceFor, totalsBy, type FinderUsageRecord } from '../shared/usage';
 import { FakeFetch, MemoryLogger } from './helpers';
@@ -120,5 +121,46 @@ describe('saved cost history', () => {
     expect(all).toHaveLength(MAX_USAGE_RECORDS);
     expect(all[0]?.id).toBe('old1');
     expect(all.at(-1)?.id).toBe('new');
+  });
+});
+
+describe('keeping search results for later', () => {
+  const result = (found: number): FinderSearchResult => ({
+    contacts: Array.from({ length: found }, (_, i) => ({
+      name: `P${i}`,
+      email: `p${i}@acme.com`,
+      organization: 'Acme',
+      role: 'HR',
+      sourceUrl: 'https://acme.com/team',
+      emailOnPage: 'yes' as const,
+    })),
+    dropped: { invalid: 0, noSource: 0, duplicate: 0, alreadyInSheet: 0, notOnPage: 0 },
+    rounds: 1,
+    target: 5,
+    found,
+    stopped: 'done',
+    checkedAgainstSheet: true,
+    cost: { model: 'gpt-6.1-sol', usage: { requests: 1, inputTokens: 0, cachedTokens: 0, outputTokens: 0, webSearchCalls: 1 }, estimatedCost: 0.01, priceKnown: true },
+  });
+
+  it('lists recent searches newest first and reopens their contacts', () => {
+    const store = new FinderResultStore(createMemorySettingsRepository());
+    store.add({ id: 'a', at: '2026-10-05T10:00:00.000Z', query: 'HR in Austin', result: result(2) });
+    store.add({ id: 'b', at: '2026-10-05T11:00:00.000Z', query: 'CTOs in Toronto', result: result(3) });
+    expect(store.list().map((s) => [s.id, s.found, s.estimatedCost])).toEqual([
+      ['b', 3, 0.01],
+      ['a', 2, 0.01],
+    ]);
+    expect(store.get('a')?.result.contacts.map((c) => c.email)).toEqual(['p0@acme.com', 'p1@acme.com']);
+    expect(store.get('missing')).toBeNull();
+  });
+
+  it('keeps only the latest searches', () => {
+    const repo = createMemorySettingsRepository();
+    const store = new FinderResultStore(repo);
+    for (let i = 0; i < MAX_SAVED_SEARCHES + 3; i++) store.add({ id: `s${i}`, at: '2026-10-05T10:00:00.000Z', query: 'q', result: result(1) });
+    expect(repo.get('finderResults')).toHaveLength(MAX_SAVED_SEARCHES);
+    expect(store.list()[0]?.id).toBe(`s${MAX_SAVED_SEARCHES + 2}`);
+    expect(store.get('s0')).toBeNull();
   });
 });

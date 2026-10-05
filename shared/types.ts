@@ -320,6 +320,40 @@ export interface FinderRunCost {
   priceKnown: boolean;
 }
 
+/** A finished search kept on this computer, so its results can be reopened and saved later. */
+export interface SavedFinderSearch {
+  id: string;
+  /** ISO time the search finished. */
+  at: string;
+  query: string;
+  result: FinderSearchResult;
+}
+
+/** One line in the list of recent searches. */
+export interface SavedFinderSearchSummary {
+  id: string;
+  at: string;
+  query: string;
+  target: number;
+  found: number;
+  stopped: FinderSearchResult['stopped'];
+  estimatedCost: number;
+}
+
+/** The search running now, or the last one since the app started. Kept in the main process so it survives page changes. */
+export interface FinderRunState {
+  id: string;
+  query: string;
+  maxResults: number;
+  startedAt: string;
+  running: boolean;
+  progress: FinderProgress | null;
+  /** Set when the search finished with results (also when cancelled or stopped early). */
+  result?: FinderSearchResult;
+  /** Set when the search failed without any results. */
+  error?: string;
+}
+
 export interface FinderProgress {
   round: number;
   found: number;

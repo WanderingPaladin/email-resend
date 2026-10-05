@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MAX_FINDER_RESULTS } from '@shared/constants';
 import { formatUsd } from '@shared/usage';
-import type { ConfigView, FinderProgress, FinderSearchResult, FoundContact } from '@shared/types';
+import type { ConfigView, FinderProgress, FinderRunState, FinderSearchResult, FoundContact, SavedFinderSearchSummary } from '@shared/types';
 import type { PageId } from '@/components/AppSidebar';
 import { Alert, Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -29,56 +29,145 @@ function hostOf(url: string): string {
   }
 }
 
+type Message = { tone: 'success' | 'error' | 'warning'; text: string };
+
+/**
+ * What the page shows, kept outside the component so it survives switching to another page and back.
+ * The search itself runs in the main process; this only remembers the form and the results on screen.
+ */
+const memory = {
+  query: '',
+  maxResults: '20',
+  /** Id of the search whose results are on screen, so they are not reset when coming back. */
+  shownId: null as string | null,
+  result: null as FinderSearchResult | null,
+  selected: new Set<string>(),
+  tabName: defaultTabName(),
+  destination: '',
+  message: null as Message | null,
+};
+
+/** The message shown when a search ends. */
+function outcomeMessage(result: FinderSearchResult): Message {
+  const costNote = `Estimated OpenAI cost of this search: ${formatUsd(result.cost.estimatedCost)}${result.cost.priceKnown ? '' : ' (web searches only; token price unknown for this model)'}.`;
+  if (result.found >= result.target) {
+    return { tone: 'success', text: `Found ${result.found} of ${result.target} after ${result.rounds} search(es). ${costNote}` };
+  }
+  const why =
+    result.stopped === 'cancelled'
+      ? 'Search cancelled.'
+      : result.stopped === 'error'
+        ? `Stopped because of an OpenAI error: ${result.warning ?? 'unknown error'}`
+        : 'The last 5 searches found nobody new, so the web seems to have no more matches. Try a broader description to find more.';
+  return { tone: 'warning', text: `Found ${result.found} of ${result.target} after ${result.rounds} search(es). ${why} ${costNote}` };
+}
+
 export function FindContactsPage({ config, onNavigate }: { config: ConfigView | null; onNavigate: (page: PageId) => void }) {
-  const [query, setQuery] = useState('');
-  const [maxResults, setMaxResults] = useState('20');
+  const [query, setQuery] = useState(memory.query);
+  const [maxResults, setMaxResults] = useState(memory.maxResults);
   const [searching, setSearching] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [result, setResult] = useState<FinderSearchResult | null>(null);
-  const [selected, setSelected] = useState<Set<string>>(new Set());
-  const [tabName, setTabName] = useState(defaultTabName);
-  const [message, setMessage] = useState<{ tone: 'success' | 'error' | 'warning'; text: string } | null>(null);
+  const [result, setResult] = useState<FinderSearchResult | null>(memory.result);
+  const [selected, setSelected] = useState<Set<string>>(memory.selected);
+  const [tabName, setTabName] = useState(memory.tabName);
+  const [message, setMessage] = useState<Message | null>(memory.message);
 
   const hasKey = Boolean(config?.hasOpenAiApiKey);
   const googleReady = Boolean(config?.settings.spreadsheetId && config.settings.serviceAccountEmail && config.hasGooglePrivateKey);
   const chosen = useMemo(() => result?.contacts.filter((c) => selected.has(c.email)) ?? [], [result, selected]);
 
   /** '' means a new tab; otherwise the name of an existing tab to add rows to. */
-  const [destination, setDestination] = useState('');
+  const [destination, setDestination] = useState(memory.destination);
   const [tabs, setTabs] = useState<string[]>([]);
   const [progress, setProgress] = useState<FinderProgress | null>(null);
+  const [recent, setRecent] = useState<SavedFinderSearchSummary[]>([]);
+  const [shownId, setShownId] = useState(memory.shownId);
   useEffect(() => api().finder.onProgress(setProgress), []);
+
+  useEffect(() => {
+    Object.assign(memory, { query, maxResults, result, selected, tabName, destination, message });
+  }, [query, maxResults, result, selected, tabName, destination, message]);
+
+  /** Puts a finished search's results on screen, with the usable contacts selected. */
+  const show = (id: string, next: FinderSearchResult, note: Message | null) => {
+    memory.shownId = id;
+    setShownId(id);
+    setResult(next);
+    setSelected(new Set(next.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)));
+    setTabName(defaultTabName());
+    setMessage(note);
+  };
+
+  const loadRecent = async () => {
+    try {
+      setRecent(await api().finder.recent());
+    } catch {
+      setRecent([]);
+    }
+  };
+
+  // The search runs in the main process, so it keeps going when this page is closed. Pick it up again here.
+  useEffect(() => {
+    let alive = true;
+    const apply = (run: FinderRunState | null) => {
+      if (!alive || !run) return;
+      if (run.running) {
+        setSearching(true);
+        setProgress(run.progress);
+        setQuery(run.query);
+        return;
+      }
+      setSearching(false);
+      if (run.id === memory.shownId) return;
+      memory.shownId = run.id;
+      if (run.result) show(run.id, run.result, outcomeMessage(run.result));
+      else if (run.error) {
+        setShownId(run.id);
+        setResult(null);
+        setMessage({ tone: 'error', text: run.error });
+      }
+      void loadRecent();
+    };
+    void api().finder.state().then(apply, () => undefined);
+    void loadRecent();
+    const off = api().finder.onDone(apply);
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
 
   const search = async () => {
     setSearching(true);
     setMessage(null);
     setResult(null);
     setProgress(null);
+    memory.shownId = null;
+    setShownId(null);
     try {
       const requested = Math.round(Number(maxResults)) || 20;
       const count = Math.min(MAX_FINDER_RESULTS, Math.max(1, requested));
       if (count !== requested) setMaxResults(String(count));
-      const next = await api().finder.search({ query, maxResults: count });
-      setResult(next);
-      // Pre-select the contacts that count toward the target; emails missing from their page stay unselected.
-      setSelected(new Set(next.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)));
-      setTabName(defaultTabName());
-      const costNote = `Estimated OpenAI cost of this search: ${formatUsd(next.cost.estimatedCost)}${next.cost.priceKnown ? '' : ' (web searches only; token price unknown for this model)'}.`;
-      if (next.found < next.target) {
-        const why =
-          next.stopped === 'cancelled'
-            ? 'Search cancelled.'
-            : next.stopped === 'error'
-              ? `Stopped because of an OpenAI error: ${next.warning ?? 'unknown error'}`
-              : 'The last 5 searches found nobody new, so the web seems to have no more matches. Try a broader description to find more.';
-        setMessage({ tone: 'warning', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${why} ${costNote}` });
-      } else {
-        setMessage({ tone: 'success', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${costNote}` });
-      }
+      // The results arrive through onDone above, also when this page was closed and opened again meanwhile.
+      await api().finder.search({ query, maxResults: count });
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
     } finally {
       setSearching(false);
+    }
+  };
+
+  const openSaved = async (id: string) => {
+    try {
+      const saved = await api().finder.openSaved(id);
+      setQuery(saved.query);
+      setDestination('');
+      show(saved.id, saved.result, {
+        tone: 'success',
+        text: `Showing the results of your search from ${new Date(saved.at).toLocaleString()}. Contacts already in your spreadsheet are skipped when you save.`,
+      });
+    } catch (e) {
+      setMessage({ tone: 'error', text: errorMessage(e) });
     }
   };
 
@@ -290,6 +379,42 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
               {destination
                 ? 'Rows are added below the last row, matched to the tab’s own headers (Name or First/Last Name, Email). Missing Name, Email, Batch Flag or Source URL columns are added at the right. Existing rows are never changed.'
                 : 'A new tab is created with Name, Email, Organization, Role, Source URL, Email on page, Batch Flag and the tracking columns.'}
+            </div>
+          </CardBody>
+        </Card>
+      )}
+
+      {recent.length > 0 && (
+        <Card>
+          <CardHeader
+            title="Recent searches"
+            description="Results of your latest searches are kept on this computer, so you can open them again and save them to the sheet later."
+          />
+          <CardBody>
+            <div className="max-h-72 overflow-y-auto rounded-md border border-slate-200">
+              <table className="w-full text-sm">
+                <tbody className="divide-y divide-slate-100">
+                  {recent.map((r) => (
+                    <tr key={r.id} className={shownId === r.id ? 'bg-slate-50' : ''}>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">
+                        {new Date(r.at).toLocaleString(undefined, { dateStyle: 'medium', timeStyle: 'short' })}
+                      </td>
+                      <td className="px-3 py-1.5">
+                        <div className="max-w-[24rem] truncate" title={r.query}>
+                          {r.query}
+                        </div>
+                      </td>
+                      <td className="whitespace-nowrap px-3 py-1.5">{`${r.found} contact(s)`}</td>
+                      <td className="whitespace-nowrap px-3 py-1.5 text-slate-600">{formatUsd(r.estimatedCost)}</td>
+                      <td className="px-3 py-1.5 text-right">
+                        <Button size="sm" variant="outline" disabled={searching || shownId === r.id} onClick={() => void openSaved(r.id)}>
+                          {shownId === r.id ? 'Showing' : 'Open'}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
             </div>
           </CardBody>
         </Card>

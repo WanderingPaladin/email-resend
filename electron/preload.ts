@@ -1,7 +1,7 @@
 import { contextBridge, ipcRenderer, type IpcRendererEvent } from 'electron';
 import type { EmailAppApi, Unsubscribe } from '../shared/api';
 import { IPC } from '../shared/constants';
-import type { CampaignProgress, CampaignSummary, FinderProgress, IpcResult, LogEntry } from '../shared/types';
+import type { CampaignProgress, CampaignSummary, FinderProgress, FinderRunState, IpcResult, LogEntry } from '../shared/types';
 
 /**
  * Preload bridge. Only the specific operations below are exposed; there is no generic
@@ -44,6 +44,10 @@ const api: EmailAppApi = {
     listTabs: () => invoke(IPC.finderTabs),
     save: (input) => invoke(IPC.finderSave, input),
     onProgress: (listener) => subscribe<FinderProgress>(IPC.finderProgress, listener),
+    state: () => invoke(IPC.finderState),
+    onDone: (listener) => subscribe<FinderRunState>(IPC.finderDone, listener),
+    recent: () => invoke(IPC.finderRecent),
+    openSaved: (id) => invoke(IPC.finderOpenSaved, { id }),
     usage: () => invoke(IPC.finderUsage),
     clearUsage: () => invoke(IPC.finderUsageClear),
   },

@@ -1,4 +1,5 @@
 import { randomUUID } from 'node:crypto';
+import type { SavedFinderSearch, SavedFinderSearchSummary } from '../../shared/types';
 import type { FinderUsageRecord } from '../../shared/usage';
 import type { SettingsRepository } from '../repositories/settings.repository';
 
@@ -12,8 +13,8 @@ export class FinderUsageLog {
     private readonly newId: () => string = randomUUID,
   ) {}
 
-  add(record: Omit<FinderUsageRecord, 'id'>): FinderUsageRecord {
-    const saved = { ...record, id: this.newId() };
+  add(record: Omit<FinderUsageRecord, 'id'>, id: string = this.newId()): FinderUsageRecord {
+    const saved = { ...record, id };
     const all = [...(this.repo.get('finderUsage') ?? []), saved];
     this.repo.set('finderUsage', all.slice(-MAX_USAGE_RECORDS));
     return saved;
@@ -26,5 +27,35 @@ export class FinderUsageLog {
 
   clear(): void {
     this.repo.set('finderUsage', []);
+  }
+}
+
+/** Finished searches kept for reopening; the oldest are dropped beyond this. */
+export const MAX_SAVED_SEARCHES = 30;
+
+/** Keeps the results of recent searches on this computer so they can be saved to the sheet later. */
+export class FinderResultStore {
+  constructor(private readonly repo: SettingsRepository) {}
+
+  add(search: SavedFinderSearch): void {
+    const others = (this.repo.get('finderResults') ?? []).filter((s) => s.id !== search.id);
+    this.repo.set('finderResults', [...others, search].slice(-MAX_SAVED_SEARCHES));
+  }
+
+  /** Recent searches that found someone, newest first. */
+  list(): SavedFinderSearchSummary[] {
+    return [...(this.repo.get('finderResults') ?? [])].reverse().map(({ id, at, query, result }) => ({
+      id,
+      at,
+      query,
+      target: result.target,
+      found: result.contacts.length,
+      stopped: result.stopped,
+      estimatedCost: result.cost.estimatedCost,
+    }));
+  }
+
+  get(id: string): SavedFinderSearch | null {
+    return (this.repo.get('finderResults') ?? []).find((s) => s.id === id) ?? null;
   }
 }

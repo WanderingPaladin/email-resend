@@ -9,6 +9,9 @@ import type {
   CampaignSummary,
   ConfigView,
   FinderProgress,
+  FinderRunState,
+  SavedFinderSearch,
+  SavedFinderSearchSummary,
   FinderSaveResult,
   FinderSearchResult,
   GoogleTestResult,
@@ -54,6 +57,14 @@ export interface EmailAppApi {
     save(input: FinderSaveInput): Promise<FinderSaveResult>;
     /** Progress of a running search (one event per search round). */
     onProgress(listener: (progress: FinderProgress) => void): Unsubscribe;
+    /** The running search, or the last one since the app started (null if none). */
+    state(): Promise<FinderRunState | null>;
+    /** Fires when a search ends, with its results or error. */
+    onDone(listener: (run: FinderRunState) => void): Unsubscribe;
+    /** Recent searches whose results are kept on this computer, newest first. */
+    recent(): Promise<SavedFinderSearchSummary[]>;
+    /** Results of a recent search, to review and save again. */
+    openSaved(id: string): Promise<SavedFinderSearch>;
     /** Every search run on this computer with its estimated OpenAI cost, newest first. */
     usage(): Promise<FinderUsageRecord[]>;
     /** Deletes the saved cost history. */
