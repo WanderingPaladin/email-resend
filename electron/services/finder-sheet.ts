@@ -1,16 +1,16 @@
-import { FINDER_TAB_HEADERS, TRACKING_COLUMNS } from '../../shared/constants';
+import { FINDER_TAB_HEADERS, TAG, TRACKING_COLUMNS } from '../../shared/constants';
 import type { FoundContact } from '../../shared/types';
 import { buildHeaderMap, resolveColumns, splitFullName } from './sheet-parser';
 
 const ON_PAGE_LABEL: Record<FoundContact['emailOnPage'], string> = { yes: 'Yes', no: 'No', unknown: 'Could not check' };
 
-/** Header row plus one row per contact for a new tab. Batch Flag stays empty until the operator reviews each contact. */
+/** Header row plus one row per contact for a new tab. Batch Flag is New, so the contacts are ready to send. */
 export function finderTabRows(contacts: readonly FoundContact[]): string[][] {
   const header = [...FINDER_TAB_HEADERS, ...TRACKING_COLUMNS];
   const blanks = TRACKING_COLUMNS.map(() => '');
   return [
     header,
-    ...contacts.map((c) => [c.name, c.email, c.organization, c.role, c.sourceUrl, ON_PAGE_LABEL[c.emailOnPage], '', ...blanks]),
+    ...contacts.map((c) => [c.name, c.email, c.organization, c.role, c.sourceUrl, ON_PAGE_LABEL[c.emailOnPage], TAG.New, ...blanks]),
   ];
 }
 
@@ -53,7 +53,7 @@ export function planAppend(values: readonly (readonly string[])[], contacts: rea
   const nameCol = columns.fullName ?? columns.firstName ?? add('Name');
   const splitName = columns.fullName === undefined && columns.firstName !== undefined;
   const emailCol = columns.email ?? add('Email');
-  if (columns.status === undefined) add('Batch Flag');
+  const statusCol = columns.status ?? add('Batch Flag');
   const sourceCol = find(SOURCE_NAMES) ?? add('Source URL');
   const orgCol = find(OPTIONAL_NAMES.organization);
   const roleCol = find(OPTIONAL_NAMES.role);
@@ -69,6 +69,7 @@ export function planAppend(values: readonly (readonly string[])[], contacts: rea
       row[nameCol] = c.name;
     }
     row[emailCol] = c.email;
+    row[statusCol] = TAG.New;
     row[sourceCol] = c.sourceUrl;
     if (orgCol !== undefined) row[orgCol] = c.organization;
     if (roleCol !== undefined) row[roleCol] = c.role;

@@ -135,5 +135,5 @@ export const IPC = {
 export const DEFAULT_OPENAI_MODEL = 'gpt-6.1-sol';
 /** Most contacts one Find Contacts run can collect (same as the campaign batch limit). */
 export const MAX_FINDER_RESULTS = 100;
-/** Columns of a tab created from search results. Batch Flag is left empty until the operator reviews each contact. */
+/** Columns of a tab created from search results. Saved contacts get Batch Flag New. */
 export const FINDER_TAB_HEADERS = ['Name', 'Email', 'Organization', 'Role', 'Source URL', 'Email on page', 'Batch Flag'] as const;

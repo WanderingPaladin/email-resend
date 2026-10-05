@@ -225,7 +225,7 @@ export function FindContactsPage({
             : `Added ${saved.rows} contact(s) below the last row of "${saved.tabName}".`) +
           (saved.addedColumns.length && saved.mode === 'existing' ? ` Added column(s): ${saved.addedColumns.join(', ')}.` : '') +
           (skipped.length ? ` Skipped ${skipped.join(' and ')}.` : '') +
-          ' Their Batch Flag is empty: set it to New for each contact you are authorized to email before sending.',
+          ' Their Batch Flag is New, so they will be included in the next campaign on that tab.',
       });
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
@@ -310,8 +310,8 @@ export function FindContactsPage({
             </button>
             .{' '}
             Skipped results (already in your spreadsheet, repeated, invalid, or not on their page) do not count: the app keeps searching
-            until it has your number (up to 100). It stops early only if you press Cancel or 5 searches in a row find nobody new. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
-            them and set Batch Flag to New.
+            until it has your number (up to 100). It stops early only if you press Cancel or 5 searches in a row find nobody new. Saved contacts get Batch Flag New, so they are sent in the next campaign on that tab: untick anyone you are not authorized to email
+            before saving.
           </p>
         </CardBody>
       </Card>

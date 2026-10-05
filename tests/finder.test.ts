@@ -141,14 +141,14 @@ describe('saving results to a new tab', () => {
     { name: '=HYPERLINK("x")', email: 'bo@acme.com', organization: '', role: '', sourceUrl: 'https://acme.com/b', emailOnPage: 'unknown' as const },
   ];
 
-  it('creates the tab with a header, an empty Batch Flag and the tracking columns', async () => {
+  it('creates the tab with a header, Batch Flag New and the tracking columns', async () => {
     const gateway = new FakeSheetsGateway(sheetRows([{ first_name: 'X', email: 'x@y.com', tag: 'New' }]));
     const sheets = new GoogleSheetsService(gateway, { spreadsheetId: 's', worksheetName: 'Emails', serviceAccountEmail: '' }, new MemoryLogger(), { sleepFn: noSleep });
     const saved = await sheets.createWorksheet('Found 1', finderTabRows(contacts));
     expect(saved).toEqual({ tabName: 'Found 1', rows: 2 });
     const tab = gateway.tabs.get('Found 1') ?? [];
     expect(tab[0]).toEqual([...FINDER_TAB_HEADERS, ...TRACKING_COLUMNS]);
-    expect(tab[1]?.slice(0, 7)).toEqual(['Ana Lopez', 'ana@acme.com', 'Acme', 'HR', 'https://acme.com/team', 'Yes', '']);
+    expect(tab[1]?.slice(0, 7)).toEqual(['Ana Lopez', 'ana@acme.com', 'Acme', 'HR', 'https://acme.com/team', 'Yes', 'New']);
     expect(tab[2]?.[5]).toBe('Could not check');
     // The Emails tab is not touched.
     expect(gateway.writeBatches).toHaveLength(0);
@@ -332,9 +332,9 @@ describe('adding found contacts to an existing tab', () => {
     const saved = await sheets.appendToWorksheet('Emails', plan);
     expect(saved).toEqual({ tabName: 'Emails', rows: 2, addedColumns: ['Source URL'] });
     expect(gateway.rows[0]).toEqual(['Name', 'Email', 'Location', 'Country', 'Role / Profile', 'Batch Flag', 'send_status', 'Source URL']);
-    // Existing rows are untouched; new rows start below the last one, Batch Flag empty.
+    // Existing rows are untouched; new rows start below the last one, Batch Flag New.
     expect(gateway.rows[1]).toEqual(['Ana Lopez', 'ana@x.com', 'Austin', 'US', 'CTO', 'Sent', 'sent']);
-    expect(gateway.rows[3]).toEqual(['Cy Diaz', 'cy@x.com', '', '', 'HR', '', '', 'https://acme.com/cy@x.com']);
+    expect(gateway.rows[3]).toEqual(['Cy Diaz', 'cy@x.com', '', '', 'HR', 'New', '', 'https://acme.com/cy@x.com']);
     expect(gateway.rows[4]?.[1]).toBe('dee@x.com');
     expect(gateway.rowWrites[0]?.startRow).toBe(4);
   });
@@ -346,7 +346,7 @@ describe('adding found contacts to an existing tab', () => {
       { index: 5, label: 'Batch Flag' },
       { index: 6, label: 'Source URL' },
     ]);
-    expect(plan.rows[0]).toEqual(['Ana', 'Maria Lopez', 'Acme', '', 'ana@x.com', '', 'https://acme.com/ana@x.com']);
+    expect(plan.rows[0]).toEqual(['Ana', 'Maria Lopez', 'Acme', '', 'ana@x.com', 'New', 'https://acme.com/ana@x.com']);
     expect(plan.firstRow).toBe(2);
   });
 

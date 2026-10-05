@@ -177,9 +177,9 @@ back, Find Contacts shows its progress, or its results once it has finished. The
 latest 30 searches are also kept on this computer under **Recent searches**, so you can open one
 again (even after restarting the app) and save it to the sheet later.
 
-Batch Flag is left **empty**, so nothing is sent to found contacts until you review them. Set Batch
-Flag to `New` only for people you are authorized to email, then either choose that tab as the
-worksheet in Settings or copy the rows into your Emails tab.
+Saved contacts get Batch Flag **New**, so they are included in the next campaign on that tab (for
+example your Emails tab, or a new tab chosen as the worksheet in Settings). Untick anyone you are
+not authorized to email before saving.
 
 ### Search costs
 
