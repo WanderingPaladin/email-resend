@@ -17,6 +17,8 @@ jobs:
           node-version: 22
           cache: npm
       - run: npm ci
+      # Electron downloads its binary on first use; do it once here so parallel test files don't race to download it.
+      - run: npx install-electron --no
       - run: npm run typecheck
       - run: npm test
 
