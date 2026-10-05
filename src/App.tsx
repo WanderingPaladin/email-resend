@@ -87,7 +87,7 @@ export function App() {
               onNavigate={navigate}
             />
           )}
-          {page === 'find' && <FindContactsPage config={configHook.config} onNavigate={navigate} />}
+          {page === 'find' && <FindContactsPage config={configHook.config} saveConfig={configHook.save} onNavigate={navigate} />}
           {page === 'costs' && <SearchCostsPage />}
           {page === 'settings' && <SettingsPage configHook={configHook} onSaved={reloadStatus} />}
           {page === 'logs' && <LogsPage logs={logs} initialFilter={logFilter} logDirectory={status?.logDirectory ?? ''} />}

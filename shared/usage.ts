@@ -30,6 +30,14 @@ export const OPENAI_PRICES: Record<string, ModelPrice> = {
   'gpt-5.6-sol': { input: 4, cachedInput: 0.4, output: 20 },
 };
 
+/** Models offered in the model pickers, cheapest first. Any other OpenAI model name can still be typed in. */
+export const OPENAI_MODEL_CHOICES: { id: string; label: string }[] = [
+  { id: 'gpt-6-luna', label: 'GPT-6 Luna: cheapest, fastest' },
+  { id: 'gpt-6.1-sol', label: 'GPT-6.1 Sol: balanced (recommended)' },
+  { id: 'gpt-5.6-sol', label: 'GPT-5.6 Sol: previous generation' },
+  { id: 'gpt-6-astra', label: 'GPT-6 Astra: most capable, most expensive' },
+];
+
 /** Web search tool calls, US dollars per call ($10 per 1,000 calls). */
 export const WEB_SEARCH_PRICE_PER_CALL = 0.01;
 

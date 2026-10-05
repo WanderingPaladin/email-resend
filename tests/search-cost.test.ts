@@ -164,3 +164,12 @@ describe('keeping search results for later', () => {
     expect(store.get('s0')).toBeNull();
   });
 });
+
+describe('model choices', () => {
+  it('offers only models with a known price, including the default', async () => {
+    const { OPENAI_MODEL_CHOICES } = await import('../shared/usage');
+    const { DEFAULT_OPENAI_MODEL } = await import('../shared/constants');
+    expect(OPENAI_MODEL_CHOICES.map((m) => m.id)).toContain(DEFAULT_OPENAI_MODEL);
+    for (const m of OPENAI_MODEL_CHOICES) expect(priceFor(m.id)).not.toBeNull();
+  });
+});

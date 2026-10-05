@@ -4,6 +4,7 @@ import type { SaveConfigInput } from '@shared/schemas';
 import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
+import { ModelSelect } from '@/components/ModelSelect';
 import { Field, Input } from '@/components/ui/form';
 import type { ConfigHook } from '@/hooks/useConfig';
 import { api, errorMessage } from '@/lib/utils';
@@ -52,8 +53,8 @@ export function OpenAiSettings({ configHook }: { configHook: ConfigHook }) {
               spellCheck={false}
             />
           </Field>
-          <Field label="Model" hint="Any OpenAI model that supports web search.">
-            <Input value={model} onChange={(e) => setModel(e.target.value)} placeholder={DEFAULT_OPENAI_MODEL} spellCheck={false} />
+          <Field label="Model for searching" hint="You can also change it on the Find Contacts page. Other models must support web search.">
+            <ModelSelect value={model} onChange={setModel} />
           </Field>
         </div>
         {message && <Alert tone={message.tone}>{message.text}</Alert>}

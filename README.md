@@ -167,6 +167,11 @@ saves them to a new tab of your spreadsheet.
      and Email on page when the tab has them). Missing Name, Email, Batch Flag or Source URL columns
      are added at the right. Existing rows and columns are never changed or reordered.
 
+Choose the **AI model** next to the number of people (the same setting as in Settings; the choice is
+remembered). GPT-6 Luna is the cheapest, GPT-6.1 Sol the recommended balance and GPT-6 Astra the
+most capable and most expensive; *Other model…* accepts any OpenAI model name that supports web
+search. The cost estimate uses the chosen model's price.
+
 The search runs in the background, so you can switch to other pages while it works: when you come
 back, Find Contacts shows its progress, or its results once it has finished. The results of your
 latest 30 searches are also kept on this computer under **Recent searches**, so you can open one

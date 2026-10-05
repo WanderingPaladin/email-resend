@@ -1,8 +1,10 @@
 import { useEffect, useMemo, useState } from 'react';
-import { MAX_FINDER_RESULTS } from '@shared/constants';
+import { DEFAULT_OPENAI_MODEL, MAX_FINDER_RESULTS } from '@shared/constants';
+import type { SaveConfigInput } from '@shared/schemas';
 import { formatUsd } from '@shared/usage';
 import type { ConfigView, FinderProgress, FinderRunState, FinderSearchResult, FoundContact, SavedFinderSearchSummary } from '@shared/types';
 import type { PageId } from '@/components/AppSidebar';
+import { ModelSelect } from '@/components/ModelSelect';
 import { Alert, Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
@@ -62,7 +64,28 @@ function outcomeMessage(result: FinderSearchResult): Message {
   return { tone: 'warning', text: `Found ${result.found} of ${result.target} after ${result.rounds} search(es). ${why} ${costNote}` };
 }
 
-export function FindContactsPage({ config, onNavigate }: { config: ConfigView | null; onNavigate: (page: PageId) => void }) {
+export function FindContactsPage({
+  config,
+  saveConfig,
+  onNavigate,
+}: {
+  config: ConfigView | null;
+  saveConfig: (input: SaveConfigInput) => Promise<unknown>;
+  onNavigate: (page: PageId) => void;
+}) {
+  const model = config?.settings.openaiModel || DEFAULT_OPENAI_MODEL;
+  const [savingModel, setSavingModel] = useState(false);
+  const chooseModel = async (next: string) => {
+    if (next === model) return;
+    setSavingModel(true);
+    try {
+      await saveConfig({ settings: { openaiModel: next } });
+    } catch (e) {
+      setMessage({ tone: 'error', text: errorMessage(e) });
+    } finally {
+      setSavingModel(false);
+    }
+  };
   const [query, setQuery] = useState(memory.query);
   const [maxResults, setMaxResults] = useState(memory.maxResults);
   const [searching, setSearching] = useState(false);
@@ -255,11 +278,14 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
           <Field label="Who are you looking for?" hint="For example: HR managers at software companies in Austin, Texas.">
             <Textarea rows={3} value={query} onChange={(e) => setQuery(e.target.value)} disabled={searching} />
           </Field>
-          <div className="flex items-end gap-3">
+          <div className="flex flex-wrap items-end gap-3">
             <Field label={`Number of people (up to ${MAX_FINDER_RESULTS})`} className="w-56">
               <Input type="number" min={1} max={MAX_FINDER_RESULTS} value={maxResults} onChange={(e) => setMaxResults(e.target.value)} disabled={searching} />
             </Field>
-            <Button loading={searching} disabled={!hasKey || query.trim().length < 3} onClick={() => void search()}>
+            <Field label="AI model" className="w-[34rem]">
+              <ModelSelect value={model} onChange={(m) => void chooseModel(m)} disabled={searching || savingModel} />
+            </Field>
+            <Button loading={searching} disabled={!hasKey || savingModel || query.trim().length < 3} onClick={() => void search()}>
               Search
             </Button>
             {searching && (
