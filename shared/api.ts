@@ -1,3 +1,4 @@
+import type { FinderUsageRecord } from './usage';
 import type { CampaignStartInput, FinderSaveInput, FinderSearchInput, SaveConfigInput, SendTestInput, RecoveryApplyInput } from './schemas';
 import type {
   AppStatus,
@@ -53,6 +54,10 @@ export interface EmailAppApi {
     save(input: FinderSaveInput): Promise<FinderSaveResult>;
     /** Progress of a running search (one event per search round). */
     onProgress(listener: (progress: FinderProgress) => void): Unsubscribe;
+    /** Every search run on this computer with its estimated OpenAI cost, newest first. */
+    usage(): Promise<FinderUsageRecord[]>;
+    /** Deletes the saved cost history. */
+    clearUsage(): Promise<boolean>;
   };
   mailer: {
     /** Checks the selected provider's credentials without sending an email. */

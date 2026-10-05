@@ -1,4 +1,5 @@
 import type { FinderSearchResult, FoundContact } from '../../shared/types';
+import { addUsage, emptyUsage, type SearchUsage } from '../../shared/usage';
 import type { AppLogger } from '../types/logger';
 import { redactText } from './log-format';
 import { readJson, type FetchLike } from './mailer';
@@ -109,6 +110,23 @@ export function responseText(body: unknown): string {
 const str = (v: unknown, max: number) => (typeof v === 'string' ? v.trim().slice(0, max) : '');
 
 /** Reads the contacts out of the model's answer. Tolerates code fences and text around the JSON. */
+/** Token counts and web search calls from a Responses API answer. Missing fields count as 0. */
+export function responseUsage(body: unknown): SearchUsage {
+  const b = (body ?? {}) as {
+    usage?: { input_tokens?: unknown; output_tokens?: unknown; input_tokens_details?: { cached_tokens?: unknown } };
+    output?: unknown;
+  };
+  const n = (v: unknown) => (typeof v === 'number' && Number.isFinite(v) && v > 0 ? v : 0);
+  const output = Array.isArray(b.output) ? b.output : [];
+  return {
+    requests: 1,
+    inputTokens: n(b.usage?.input_tokens),
+    cachedTokens: n(b.usage?.input_tokens_details?.cached_tokens),
+    outputTokens: n(b.usage?.output_tokens),
+    webSearchCalls: output.filter((item) => (item as { type?: unknown })?.type === 'web_search_call').length,
+  };
+}
+
 export function parseContactsJson(text: string): RawContact[] {
   const start = text.search(/[{[]/);
   const end = Math.max(text.lastIndexOf('}'), text.lastIndexOf(']'));
@@ -202,7 +220,7 @@ function apiErrorMessage(body: unknown): string {
 export class ContactFinder {
   constructor(
     private readonly apiKey: string,
-    private readonly model: string,
+    readonly model: string,
     private readonly logger: AppLogger,
     private readonly fetchFn: FetchLike = fetch,
   ) {}
@@ -257,6 +275,13 @@ export class ContactFinder {
     return { message: `OpenAI key works and model "${this.model}" is available.` };
   }
 
+  private spent: SearchUsage = emptyUsage();
+
+  /** Tokens and web searches used by every search this finder has run. */
+  usage(): SearchUsage {
+    return { ...this.spent };
+  }
+
   async search(query: string, maxResults: number, hints: SearchHints = {}, cancel?: AbortSignal): Promise<RawContact[]> {
     this.logger.info('finder', 'Contact search started', {
       model: this.model,
@@ -278,6 +303,7 @@ export class ContactFinder {
       SEARCH_TIMEOUT_MS,
       cancel,
     );
+    if (status === 200) this.spent = addUsage(this.spent, responseUsage(body));
     if (status !== 200) this.fail(status, body);
     const state = (body as { status?: string })?.status;
     if (state === 'failed') {
@@ -381,7 +407,7 @@ export async function findUntilTarget(
   target: number,
   existing: ReadonlySet<string>,
   options: FindOptions = {},
-): Promise<Omit<FinderSearchResult, 'checkedAgainstSheet'>> {
+): Promise<Omit<FinderSearchResult, 'checkedAgainstSheet' | 'cost'>> {
   const stallLimit = options.stallLimit ?? STALL_LIMIT;
   const sleepFn = options.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const accepted: FoundContact[] = [];

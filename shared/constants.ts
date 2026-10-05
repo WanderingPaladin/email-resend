@@ -106,6 +106,8 @@ export const IPC = {
   finderTabs: 'finder:tabs',
   finderCancel: 'finder:cancel',
   finderProgress: 'finder:progress',
+  finderUsage: 'finder:usage',
+  finderUsageClear: 'finder:usage-clear',
 
   campaignSendTest: 'campaign:send-test',
   campaignStart: 'campaign:start',

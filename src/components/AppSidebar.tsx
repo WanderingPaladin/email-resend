@@ -1,11 +1,12 @@
 import { cn } from '@/lib/utils';
 
-export type PageId = 'dashboard' | 'campaign' | 'find' | 'settings' | 'logs' | 'recovery';
+export type PageId = 'dashboard' | 'campaign' | 'find' | 'costs' | 'settings' | 'logs' | 'recovery';
 
 const ITEMS: { id: PageId; label: string }[] = [
   { id: 'dashboard', label: 'Dashboard' },
   { id: 'campaign', label: 'Campaign' },
   { id: 'find', label: 'Find Contacts' },
+  { id: 'costs', label: 'Search Costs' },
   { id: 'settings', label: 'Settings' },
   { id: 'logs', label: 'Logs' },
 ];

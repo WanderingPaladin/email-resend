@@ -1,9 +1,11 @@
 import { IPC } from '../../shared/constants';
 import { finderSaveInputSchema, finderSearchInputSchema } from '../../shared/schemas';
-import type { FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
+import type { FinderProgress, FinderRunCost, FinderSaveResult, FinderSearchResult, FoundContact } from '../../shared/types';
+import { estimateCost } from '../../shared/usage';
 import type { AppContext } from '../app-context';
 import { findUntilTarget } from '../services/contact-finder.service';
 import { finderTabRows, planAppend } from '../services/finder-sheet';
+import { FinderUsageLog } from '../services/finder-usage.service';
 import { broadcast, handle, type IpcDeps } from './handle';
 
 /** Layout for a blank existing tab: header in row 1, contacts below. */
@@ -61,34 +63,77 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
     }
   });
 
+  const usageLog = new FinderUsageLog(ctx.repo);
+  handle(deps, IPC.finderUsage, null, () => usageLog.list());
+  handle(deps, IPC.finderUsageClear, null, () => {
+    usageLog.clear();
+    ctx.logger.info('finder', 'Search cost history cleared');
+    return true;
+  });
+
   const runSearch = async (
     finder: ReturnType<AppContext['createFinder']>,
     query: string,
     maxResults: number,
     signal: AbortSignal,
   ): Promise<FinderSearchResult> => {
+    const costSoFar = (): FinderRunCost => {
+      const usage = finder.usage();
+      const { cost, complete } = estimateCost(finder.model, usage);
+      return { model: finder.model, usage, estimatedCost: cost, priceKnown: complete };
+    };
+    let last: FinderProgress | null = null;
+    let outcome: Pick<FinderSearchResult, 'found' | 'rounds' | 'stopped'> | null = null;
 
-    // Leave out people who are already in any tab of the spreadsheet.
-    let existing = new Set<string>();
-    let checkedAgainstSheet = false;
-    if (ctx.config.isGoogleConfigured()) {
-      try {
-        existing = await ctx.createSheets().readAllEmails();
-        checkedAgainstSheet = true;
-      } catch (error) {
-        ctx.logger.warn('finder', 'Could not read the spreadsheet to skip existing contacts', {
-          reason: error instanceof Error ? error.message : String(error),
+    try {
+      // Leave out people who are already in any tab of the spreadsheet.
+      let existing = new Set<string>();
+      let checkedAgainstSheet = false;
+      if (ctx.config.isGoogleConfigured()) {
+        try {
+          existing = await ctx.createSheets().readAllEmails();
+          checkedAgainstSheet = true;
+        } catch (error) {
+          ctx.logger.warn('finder', 'Could not read the spreadsheet to skip existing contacts', {
+            reason: error instanceof Error ? error.message : String(error),
+          });
+        }
+      }
+
+      const result = await findUntilTarget(finder, query, maxResults, existing, {
+        logger: ctx.logger,
+        signal,
+        onProgress: (progress) => {
+          last = { ...progress, estimatedCost: costSoFar().estimatedCost };
+          broadcast(IPC.finderProgress, last);
+        },
+      });
+      outcome = result;
+      const cost = costSoFar();
+      ctx.logger.info('finder', `Contact search finished (${result.stopped}): ${result.found} of ${maxResults} in ${result.rounds} search(es)`, {
+        ...result.dropped,
+        estimatedCostUsd: Number(cost.estimatedCost.toFixed(4)),
+      });
+      return { ...result, checkedAgainstSheet, cost };
+    } finally {
+      // Every run that reached OpenAI is recorded, including ones that failed.
+      const cost = costSoFar();
+      if (cost.usage.requests > 0) {
+        const seen = last as FinderProgress | null;
+        usageLog.add({
+          at: new Date().toISOString(),
+          query,
+          model: cost.model,
+          target: maxResults,
+          found: outcome?.found ?? seen?.found ?? 0,
+          rounds: outcome?.rounds ?? seen?.round ?? cost.usage.requests,
+          stopped: outcome?.stopped ?? (signal.aborted ? 'cancelled' : 'error'),
+          usage: cost.usage,
+          estimatedCost: cost.estimatedCost,
+          priceKnown: cost.priceKnown,
         });
       }
     }
-
-    const result = await findUntilTarget(finder, query, maxResults, existing, {
-      logger: ctx.logger,
-      signal,
-      onProgress: (progress) => broadcast(IPC.finderProgress, progress),
-    });
-    ctx.logger.info('finder', `Contact search finished (${result.stopped}): ${result.found} of ${maxResults} in ${result.rounds} search(es)`, result.dropped);
-    return { ...result, checkedAgainstSheet };
   };
 
   handle(deps, IPC.finderTabs, null, () => ctx.createSheets().listWorksheets());

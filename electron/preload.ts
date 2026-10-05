@@ -44,6 +44,8 @@ const api: EmailAppApi = {
     listTabs: () => invoke(IPC.finderTabs),
     save: (input) => invoke(IPC.finderSave, input),
     onProgress: (listener) => subscribe<FinderProgress>(IPC.finderProgress, listener),
+    usage: () => invoke(IPC.finderUsage),
+    clearUsage: () => invoke(IPC.finderUsageClear),
   },
   mailer: {
     validate: () => invoke(IPC.mailerValidate),

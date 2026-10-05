@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { MAX_FINDER_RESULTS } from '@shared/constants';
+import { formatUsd } from '@shared/usage';
 import type { ConfigView, FinderProgress, FinderSearchResult, FoundContact } from '@shared/types';
 import type { PageId } from '@/components/AppSidebar';
 import { Alert, Badge } from '@/components/ui/badge';
@@ -62,6 +63,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
       // Pre-select the contacts that count toward the target; emails missing from their page stay unselected.
       setSelected(new Set(next.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)));
       setTabName(defaultTabName());
+      const costNote = `Estimated OpenAI cost of this search: ${formatUsd(next.cost.estimatedCost)}${next.cost.priceKnown ? '' : ' (web searches only; token price unknown for this model)'}.`;
       if (next.found < next.target) {
         const why =
           next.stopped === 'cancelled'
@@ -69,7 +71,9 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
             : next.stopped === 'error'
               ? `Stopped because of an OpenAI error: ${next.warning ?? 'unknown error'}`
               : 'The last 5 searches found nobody new, so the web seems to have no more matches. Try a broader description to find more.';
-        setMessage({ tone: 'warning', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${why}` });
+        setMessage({ tone: 'warning', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${why} ${costNote}` });
+      } else {
+        setMessage({ tone: 'success', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${costNote}` });
       }
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
@@ -178,12 +182,18 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
               <span className="pb-2 text-xs text-slate-500">
                 {progress
                   ? `Search ${progress.round + 1}: ${progress.found} of ${progress.target} found so far.` +
-                    (progress.emptyInARow > 0 ? ` (${progress.emptyInARow} search(es) in a row found nobody new)` : '')
+                    (progress.emptyInARow > 0 ? ` (${progress.emptyInARow} search(es) in a row found nobody new)` : '') +
+                    (progress.estimatedCost !== undefined ? ` Estimated cost so far: ${formatUsd(progress.estimatedCost)}.` : '')
                   : 'Searching the web. Each search can take a minute or two.'}
               </span>
             )}
           </div>
           <p className="text-xs text-slate-500">
+            Each search shows its estimated OpenAI cost.{' '}
+            <button type="button" className="underline" onClick={() => onNavigate('costs')}>
+              See totals by day, week and month
+            </button>
+            .{' '}
             Skipped results (already in your spreadsheet, repeated, invalid, or not on their page) do not count: the app keeps searching
             until it has your number (up to 100). It stops early only if you press Cancel or 5 searches in a row find nobody new. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
             them and set Batch Flag to New.
@@ -196,7 +206,7 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
       {result && result.contacts.length > 0 && (
         <Card>
           <CardHeader
-            title={`${result.found} of ${result.target} contact(s) found in ${result.rounds} search(es)`}
+            title={`${result.found} of ${result.target} contact(s) found in ${result.rounds} search(es) · estimated cost ${formatUsd(result.cost.estimatedCost)}${result.cost.priceKnown ? '' : '+'}`}
             description={
               [
                 droppedText.length > 0 ? `Left out: ${droppedText.join(', ')}.` : '',

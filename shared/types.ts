@@ -1,3 +1,4 @@
+import type { SearchUsage } from './usage';
 import type {
   CampaignStartInput,
   EmailContent,
@@ -305,6 +306,18 @@ export interface FinderSearchResult {
   warning?: string;
   /** False when the spreadsheet could not be read to drop existing contacts. */
   checkedAgainstSheet: boolean;
+  /** What this run used, with its estimated cost. */
+  cost: FinderRunCost;
+}
+
+/** OpenAI usage of one run, priced from list prices. An estimate, not the bill. */
+export interface FinderRunCost {
+  model: string;
+  usage: SearchUsage;
+  /** Estimated US dollars. */
+  estimatedCost: number;
+  /** False when the model's token price is unknown, so only web searches are counted. */
+  priceKnown: boolean;
 }
 
 export interface FinderProgress {
@@ -313,6 +326,8 @@ export interface FinderProgress {
   target: number;
   /** Searches in a row that found nobody new. */
   emptyInARow: number;
+  /** Estimated cost of the run so far, in US dollars. */
+  estimatedCost?: number;
 }
 
 export interface FinderSaveResult {

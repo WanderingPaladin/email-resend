@@ -171,6 +171,21 @@ Batch Flag is left **empty**, so nothing is sent to found contacts until you rev
 Flag to `New` only for people you are authorized to email, then either choose that tab as the
 worksheet in Settings or copy the rows into your Emails tab.
 
+### Search costs
+
+Each search shows its **estimated** OpenAI cost while it runs and when it finishes. The **Search
+Costs** page lists every search with its tokens, web searches and estimated cost, plus totals for
+today, this week (weeks start on Monday), this month and all time, and a table grouped by day,
+week or month.
+
+The estimate uses the token counts and web search calls OpenAI reports with each answer, priced at
+OpenAI's list prices (standard tier, October 2026, see `shared/usage.ts`): web searches at $10 per
+1,000 calls, plus input, cached input and output tokens at the model's rate. Searches that failed
+before OpenAI answered cost nothing and are not counted. For a model the app has no price for, only
+the web searches are counted and the amount is marked with `+`. Your OpenAI billing page has the
+exact charges. The history is kept on this computer only (in `settings.json`, the latest 5,000
+searches) and can be cleared on that page.
+
 ## Workflow
 
 1. **Settings**: configure Google Sheets and the email provider, then test both connections.
@@ -209,7 +224,7 @@ All paths are inside Electron's user-data folder (`%APPDATA%\Email Sender` on Wi
 
 | Path | Contents |
 | --- | --- |
-| `settings.json` | Non-secret settings, campaign history, encrypted credentials (ciphertext only) |
+| `settings.json` | Non-secret settings, campaign history, search cost history, encrypted credentials (ciphertext only) |
 | `logs/main.log` | All log entries (rotates to `main.old.log` at 5 MB) |
 | `logs/campaign.log` | Campaign entries only |
 | `journal/<campaign-id>.jsonl` | Per-contact send outcomes used for crash recovery (emails masked) |
