@@ -45,6 +45,8 @@ export interface EmailAppApi {
     /** Checks the OpenAI key and model without running a search. */
     validate(): Promise<{ message: string }>;
     search(input: FinderSearchInput): Promise<FinderSearchResult>;
+    /** Stops a running search; what was found so far is returned by search(). */
+    cancel(): Promise<boolean>;
     /** Tab names of the spreadsheet, for choosing where to save. */
     listTabs(): Promise<string[]>;
     /** Saves the contacts to a new tab, or below the last row of an existing tab. */

@@ -296,7 +296,12 @@ export interface FinderSearchResult {
   target: number;
   /** Usable contacts found (email on the page or page not checkable). Less than target when the search stopped short. */
   found: number;
-  /** Why the search stopped early, when a later round failed. */
+  /**
+   * Why the run ended: target reached ('done'), Cancel pressed, several searches in a row found
+   * nobody new ('no_more_results'), or a permanent OpenAI error ('error', see warning).
+   */
+  stopped: 'done' | 'cancelled' | 'no_more_results' | 'error';
+  /** The error that ended the run, when stopped is 'error'. */
   warning?: string;
   /** False when the spreadsheet could not be read to drop existing contacts. */
   checkedAgainstSheet: boolean;
@@ -304,9 +309,10 @@ export interface FinderSearchResult {
 
 export interface FinderProgress {
   round: number;
-  maxRounds: number;
   found: number;
   target: number;
+  /** Searches in a row that found nobody new. */
+  emptyInARow: number;
 }
 
 export interface FinderSaveResult {

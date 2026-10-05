@@ -5,13 +5,14 @@ import {
   buildSearchInput,
   cleanFoundContacts,
   ContactFinder,
+  ContactFinderError,
   findUntilTarget,
-  maxRoundsFor,
   isPublicWebUrl,
   normalizePageText,
   parseContactsJson,
   responseText,
   type RawContact,
+  type SearchHints,
 } from '../electron/services/contact-finder.service';
 import { GoogleSheetsService } from '../electron/services/google-sheets.service';
 import { redactText } from '../electron/services/log-format';
@@ -195,90 +196,115 @@ describe('duplicate check across the whole spreadsheet', () => {
   });
 });
 
-describe('searching again until the requested number is found', () => {
-  /** Returns scripted rounds and marks listed emails as missing from their page. */
-  function fakeSearcher(rounds: RawContact[][], notOnPage: string[] = []) {
-    const calls: { need: number; exclude: string[] }[] = [];
+describe('searching until the requested number is found', () => {
+  /** Returns scripted rounds (an Error entry is thrown) and marks listed emails as missing from their page. */
+  function fakeSearcher(rounds: (RawContact[] | Error)[], notOnPage: string[] = []) {
+    const calls: { need: number; hints: SearchHints }[] = [];
     return {
       calls,
-      search: async (_q: string, need: number, exclude: readonly string[] = []) => {
-        calls.push({ need, exclude: [...exclude] });
+      search: async (_q: string, need: number, hints: SearchHints = {}) => {
+        calls.push({ need, hints });
         const next = rounds.shift();
-        if (!next) throw new Error('OpenAI rate limit or quota reached.');
+        if (next === undefined) return [];
+        if (next instanceof Error) throw next;
         return next;
       },
       checkOnPage: async (contacts: readonly RawContact[]) =>
         contacts.map((c) => ({ ...c, emailOnPage: notOnPage.includes(c.email) ? ('no' as const) : ('yes' as const) })),
     };
   }
+  const opts = { sleepFn: noSleep };
 
   it('asks for the missing number, excluding everything seen, until the target is reached', async () => {
     const searcher = fakeSearcher(
       [
         [raw('a@x.com'), raw('in-sheet@x.com'), raw('bad-email'), raw('fake@x.com')],
-        [raw('a@x.com'), raw('b@x.com')],
+        [raw('a@x.com'), raw('b@x.com', { organization: 'Beta' })],
         [raw('c@x.com'), raw('d@x.com')],
       ],
       ['fake@x.com'],
     );
     const progress: number[] = [];
-    const result = await findUntilTarget(searcher, 'HR', 3, new Set(['in-sheet@x.com']), { onProgress: (p) => progress.push(p.found) });
+    const result = await findUntilTarget(searcher, 'HR', 3, new Set(['in-sheet@x.com']), { ...opts, onProgress: (p) => progress.push(p.found) });
     expect(result.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)).toEqual(['a@x.com', 'b@x.com', 'c@x.com']);
-    expect(result.contacts.find((c) => c.email === 'fake@x.com')?.emailOnPage).toBe('no');
-    expect(result).toMatchObject({ rounds: 3, target: 3, found: 3 });
+    expect(result).toMatchObject({ rounds: 3, target: 3, found: 3, stopped: 'done' });
     expect(result.dropped).toMatchObject({ alreadyInSheet: 1, invalid: 1, notOnPage: 1, duplicate: 1 });
     expect(searcher.calls.map((c) => c.need)).toEqual([3, 2, 1]);
-    expect(searcher.calls[1]?.exclude).toEqual(expect.arrayContaining(['a@x.com', 'in-sheet@x.com', 'fake@x.com']));
+    expect(searcher.calls[1]?.hints.exclude).toEqual(expect.arrayContaining(['a@x.com', 'in-sheet@x.com', 'fake@x.com']));
+    expect(searcher.calls[2]?.hints.organizations).toEqual(expect.arrayContaining(['Acme', 'Beta']));
+    expect(searcher.calls.map((c) => c.hints.round)).toEqual([1, 2, 3]);
     expect(progress).toEqual([1, 2, 3]);
   });
 
-  it('stops after the round limit and reports the shortfall', async () => {
-    const searcher = fakeSearcher([[raw('a@x.com')], [raw('b@x.com')], [raw('c@x.com')]]);
-    const result = await findUntilTarget(searcher, 'HR', 10, new Set(), { maxRounds: 3 });
-    expect(result).toMatchObject({ rounds: 3, found: 3, target: 10 });
-    expect(searcher.calls).toHaveLength(3);
+  it('has no fixed number of searches: keeps going while searches still add people', async () => {
+    // One new person per search: 30 searches for 30 people.
+    const rounds = Array.from({ length: 30 }, (_, i) => [raw(`p${i}@x.com`)]);
+    const searcher = fakeSearcher(rounds);
+    const result = await findUntilTarget(searcher, 'HR', 30, new Set(), opts);
+    expect(result).toMatchObject({ found: 30, rounds: 30, stopped: 'done' });
   });
 
-  it('stops after two rounds in a row that add nobody', async () => {
-    const searcher = fakeSearcher([[raw('a@x.com')], [raw('a@x.com')], [], [raw('b@x.com')]]);
-    const result = await findUntilTarget(searcher, 'HR', 5, new Set());
-    expect(result).toMatchObject({ rounds: 3, found: 1 });
-  });
-
-  it('keeps earlier results when a later round fails, and fails when there is nothing', async () => {
-    const partial = await findUntilTarget(fakeSearcher([[raw('a@x.com')]]), 'HR', 5, new Set());
-    expect(partial.found).toBe(1);
-    expect(partial.warning).toContain('rate limit');
-    await expect(findUntilTarget(fakeSearcher([]), 'HR', 5, new Set())).rejects.toThrow('rate limit');
-  });
-
-  it('reaches 100 by asking for at most 25 per search, with extra searches for skipped results', async () => {
+  it('reaches 100 by asking for at most 25 per search, even when many results are skipped', async () => {
     let n = 0;
-    const batch = (size: number) => Array.from({ length: size }, () => raw(`p${++n}@x.com`));
-    // Every search returns what was asked, but a fifth of each batch is already in the sheet.
     const existing = new Set<string>();
     const searcher = {
       needs: [] as number[],
       search: async (_q: string, need: number) => {
         searcher.needs.push(need);
-        const found = batch(need);
-        found.slice(0, Math.floor(need / 5)).forEach((c) => existing.add(c.email));
+        const found = Array.from({ length: need }, () => raw(`p${++n}@x.com`));
+        // Half of every batch is already in the sheet.
+        found.slice(0, Math.floor(need / 2)).forEach((c) => existing.add(c.email));
         return found;
       },
       checkOnPage: async (contacts: readonly RawContact[]) => contacts.map((c) => ({ ...c, emailOnPage: 'yes' as const })),
     };
-    const result = await findUntilTarget(searcher, 'HR', 100, existing);
-    expect(maxRoundsFor(20)).toBe(5);
-    expect(maxRoundsFor(100)).toBe(8);
+    const result = await findUntilTarget(searcher, 'HR', 100, existing, opts);
     expect(Math.max(...searcher.needs)).toBe(25);
-    expect(result).toMatchObject({ found: 100, target: 100 });
+    expect(result).toMatchObject({ found: 100, target: 100, stopped: 'done' });
     expect(result.contacts).toHaveLength(100);
-    expect(searcher.needs.slice(0, 4)).toEqual([25, 25, 25, 25]);
-    expect(result.dropped.alreadyInSheet).toBe(searcher.needs.reduce((sum, need) => sum + Math.floor(need / 5), 0));
   });
 
-  it('tells the model which emails to leave out', () => {
-    expect(buildSearchInput('HR', 2, ['a@x.com'])).toContain('Do not include them');
+  it('stops only after 5 searches in a row that add nobody, and reports the shortfall', async () => {
+    const searcher = fakeSearcher([[raw('a@x.com')], [raw('a@x.com')], [], [], [raw('b@x.com')], [], [], [], [], []]);
+    const result = await findUntilTarget(searcher, 'HR', 10, new Set(), opts);
+    // a (1), 3 empty, b (5), then 5 empty in a row → 10 searches.
+    expect(result).toMatchObject({ found: 2, rounds: 10, stopped: 'no_more_results' });
+  });
+
+  it('retries temporary OpenAI errors and continues', async () => {
+    const temporary = new ContactFinderError('OpenAI did not answer in time.', true);
+    const sleeps: number[] = [];
+    const searcher = fakeSearcher([temporary, temporary, [raw('a@x.com')]]);
+    const result = await findUntilTarget(searcher, 'HR', 1, new Set(), { sleepFn: async (ms) => void sleeps.push(ms) });
+    expect(result).toMatchObject({ found: 1, rounds: 1, stopped: 'done' });
+    expect(sleeps).toEqual([5000, 10000]);
+  });
+
+  it('keeps earlier results on a permanent error, and fails when there is nothing', async () => {
+    const quota = new ContactFinderError('OpenAI quota reached.', false);
+    const partial = await findUntilTarget(fakeSearcher([[raw('a@x.com')], quota]), 'HR', 5, new Set(), opts);
+    expect(partial).toMatchObject({ found: 1, stopped: 'error', warning: 'OpenAI quota reached.' });
+    await expect(findUntilTarget(fakeSearcher([quota]), 'HR', 5, new Set(), opts)).rejects.toThrow('quota');
+  });
+
+  it('stops on Cancel and returns what was found', async () => {
+    const controller = new AbortController();
+    const searcher = fakeSearcher([[raw('a@x.com')], [raw('b@x.com')], [raw('c@x.com')]]);
+    const result = await findUntilTarget(searcher, 'HR', 10, new Set(), {
+      ...opts,
+      signal: controller.signal,
+      onProgress: (p) => {
+        if (p.found === 2) controller.abort();
+      },
+    });
+    expect(result).toMatchObject({ found: 2, rounds: 2, stopped: 'cancelled' });
+  });
+
+  it('steers later searches to new places', () => {
+    const input = buildSearchInput('HR', 2, { exclude: ['a@x.com'], organizations: ['Acme'], round: 3 });
+    expect(input).toContain('Do not include them');
+    expect(input).toContain('Prefer other organizations:\nAcme');
+    expect(input).toContain('search number 3');
     expect(buildSearchInput('HR', 2)).not.toContain('Do not include');
   });
 });

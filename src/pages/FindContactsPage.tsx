@@ -62,15 +62,14 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
       // Pre-select the contacts that count toward the target; emails missing from their page stay unselected.
       setSelected(new Set(next.contacts.filter((c) => c.emailOnPage !== 'no').map((c) => c.email)));
       setTabName(defaultTabName());
-      if (next.contacts.length === 0) {
-        setMessage({ tone: 'warning', text: `No new contacts were found after ${next.rounds} search(es). Try describing the people differently.` });
-      } else if (next.found < next.target) {
-        setMessage({
-          tone: 'warning',
-          text:
-            `Found ${next.found} of ${next.target} after ${next.rounds} search(es), then stopped. ` +
-            (next.warning ? `The last search failed: ${next.warning}` : 'Try a broader description to find more.'),
-        });
+      if (next.found < next.target) {
+        const why =
+          next.stopped === 'cancelled'
+            ? 'Search cancelled.'
+            : next.stopped === 'error'
+              ? `Stopped because of an OpenAI error: ${next.warning ?? 'unknown error'}`
+              : 'The last 5 searches found nobody new, so the web seems to have no more matches. Try a broader description to find more.';
+        setMessage({ tone: 'warning', text: `Found ${next.found} of ${next.target} after ${next.rounds} search(es). ${why}` });
       }
     } catch (e) {
       setMessage({ tone: 'error', text: errorMessage(e) });
@@ -171,16 +170,22 @@ export function FindContactsPage({ config, onNavigate }: { config: ConfigView | 
               Search
             </Button>
             {searching && (
+              <Button variant="outline" onClick={() => void api().finder.cancel()}>
+                Cancel
+              </Button>
+            )}
+            {searching && (
               <span className="pb-2 text-xs text-slate-500">
                 {progress
-                  ? `Search ${Math.min(progress.round + 1, progress.maxRounds)} of up to ${progress.maxRounds}: ${progress.found} of ${progress.target} found so far.`
+                  ? `Search ${progress.round + 1}: ${progress.found} of ${progress.target} found so far.` +
+                    (progress.emptyInARow > 0 ? ` (${progress.emptyInARow} search(es) in a row found nobody new)` : '')
                   : 'Searching the web. Each search can take a minute or two.'}
               </span>
             )}
           </div>
           <p className="text-xs text-slate-500">
-            If some results are skipped (already in your spreadsheet, repeated, invalid, or not on their page), the app searches again
-            for the rest until it reaches your number (up to 100), or stops and tells you how many it found. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
+            Skipped results (already in your spreadsheet, repeated, invalid, or not on their page) do not count: the app keeps searching
+            until it has your number (up to 100). It stops early only if you press Cancel or 5 searches in a row find nobody new. Only email contacts you are authorized to email. Results are saved with an empty Batch Flag, so nothing is sent until you review
             them and set Batch Flag to New.
           </p>
         </CardBody>

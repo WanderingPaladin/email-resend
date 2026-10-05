@@ -152,11 +152,13 @@ saves them to a new tab of your spreadsheet.
    whose email already appears in **any tab** of the spreadsheet (the Emails tab, earlier search tabs,
    any column) are left out. The same check runs again when you save, and the app tells you how many
    were skipped.
-   When results are skipped (including emails not found on their page), the app searches again for
-   the missing number, telling the model which emails to leave out, until it reaches the number you
-   asked for (up to 100 per run; each search asks for at most 25 people). It allows enough searches
-   for your number plus 4 extra to replace skipped ones (20 people: 5 searches, 100 people: 8), stops
-   early after 2 searches in a row that find nobody new, and says how many it found. Each search uses OpenAI credits.
+   Skipped results (already in the spreadsheet, repeated, invalid, or not on their page) do not
+   count. The app keeps searching, with no fixed number of searches, until it has the number you
+   asked for (up to 100; each search asks for at most 25). Every new search is told which emails and
+   organizations were already found and is steered to other sources. Temporary OpenAI errors (rate
+   limit, timeout) are retried. The run ends early only when you press **Cancel** (you keep what was
+   found), on a permanent OpenAI error such as no credits, or when 5 searches in a row find nobody
+   new. The page shows live progress. Each search uses OpenAI credits.
 4. Choose where to save:
    - **New tab**: enter a name. The tab gets Name, Email, Organization, Role, Source URL, Email on
      page, Batch Flag and the tracking columns. An existing tab is never overwritten.

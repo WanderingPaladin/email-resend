@@ -21,9 +21,24 @@ export interface RawContact {
 }
 
 export class ContactFinderError extends Error {
-  constructor(message: string) {
+  /**
+   * @param retryable a temporary problem (timeout, network, rate limit, server error): the same
+   *   search can be tried again after a pause.
+   */
+  constructor(
+    message: string,
+    readonly retryable = false,
+  ) {
     super(message);
     this.name = 'ContactFinderError';
+  }
+}
+
+/** The operator pressed Cancel. */
+export class SearchCancelledError extends Error {
+  constructor() {
+    super('Search cancelled.');
+    this.name = 'SearchCancelledError';
   }
 }
 
@@ -44,11 +59,35 @@ export const FINDER_INSTRUCTIONS = [
 /** Emails from earlier rounds sent back to the model so it looks for other people (bounded to keep the request small). */
 const MAX_EXCLUDED_IN_PROMPT = 300;
 
-export function buildSearchInput(query: string, maxResults: number, exclude: readonly string[] = []): string {
-  const base = `Find up to ${maxResults} people matching this description:\n${query.trim()}`;
-  const list = exclude.slice(-MAX_EXCLUDED_IN_PROMPT);
-  if (list.length === 0) return base;
-  return `${base}\n\nThese email addresses were already found or cannot be used. Do not include them; find different people:\n${list.join('\n')}`;
+const MAX_ORGANIZATIONS_IN_PROMPT = 150;
+
+export interface SearchHints {
+  /** Emails already seen: never return them. */
+  exclude?: readonly string[];
+  /** Organizations already used: look at other ones first. */
+  organizations?: readonly string[];
+  /** 1 for the first search; later searches are asked to look in new places. */
+  round?: number;
+}
+
+export function buildSearchInput(query: string, maxResults: number, hints: SearchHints = {}): string {
+  const parts = [`Find up to ${maxResults} people matching this description:\n${query.trim()}`];
+  const exclude = (hints.exclude ?? []).slice(-MAX_EXCLUDED_IN_PROMPT);
+  if (exclude.length > 0) {
+    parts.push(`These email addresses were already found or cannot be used. Do not include them; find different people:\n${exclude.join('\n')}`);
+  }
+  const organizations = (hints.organizations ?? []).slice(-MAX_ORGANIZATIONS_IN_PROMPT);
+  if (organizations.length > 0) {
+    parts.push(`People from these organizations were already found. Prefer other organizations:\n${organizations.join('\n')}`);
+  }
+  if ((hints.round ?? 1) > 1) {
+    parts.push(
+      `This is search number ${hints.round}. Earlier searches already covered the obvious results, so search in different places: ` +
+        'other companies and locations that fit the description, staff and team pages, professional association member directories, ' +
+        'conference and event speaker lists, press and media contact pages.',
+    );
+  }
+  return parts.join('\n\n');
 }
 
 /** Text of the assistant's final message in a Responses API result. */
@@ -168,21 +207,25 @@ export class ContactFinder {
     private readonly fetchFn: FetchLike = fetch,
   ) {}
 
-  private async api(path: string, init: RequestInit, timeoutMs: number): Promise<{ status: number; body: unknown }> {
+  private async api(path: string, init: RequestInit, timeoutMs: number, cancel?: AbortSignal): Promise<{ status: number; body: unknown }> {
+    if (cancel?.aborted) throw new SearchCancelledError();
     let response: Response;
     try {
+      const timeout = AbortSignal.timeout(timeoutMs);
       response = await this.fetchFn(`${API}${path}`, {
         ...init,
         headers: { Authorization: `Bearer ${this.apiKey}`, 'Content-Type': 'application/json' },
-        signal: AbortSignal.timeout(timeoutMs),
+        signal: cancel ? AbortSignal.any([timeout, cancel]) : timeout,
       });
     } catch (error) {
+      if (cancel?.aborted) throw new SearchCancelledError();
       const name = (error as { name?: string })?.name;
       if (name === 'TimeoutError' || name === 'AbortError') {
-        throw new ContactFinderError('OpenAI did not answer in time. Try a narrower search or fewer results.');
+        throw new ContactFinderError('OpenAI did not answer in time.', true);
       }
       throw new ContactFinderError(
         `Could not reach OpenAI (${redactText(String((error as Error)?.message ?? error)).slice(0, 200)}). Check that this computer can open https://api.openai.com.`,
+        true,
       );
     }
     return { status: response.status, body: await readJson(response) };
@@ -195,9 +238,16 @@ export class ContactFinder {
       throw new ContactFinderError(`OpenAI model "${this.model}" was not found for this key. Change the model in Settings.${message ? ` (${message})` : ''}`);
     }
     if (status === 429) {
-      throw new ContactFinderError(`OpenAI rate limit or quota reached. Check your OpenAI plan and billing.${message ? ` (${message})` : ''}`);
+      // "insufficient_quota" (no credits) does not go away by waiting; a rate limit does.
+      const quota = /quota|billing|credit/i.test(message);
+      throw new ContactFinderError(
+        quota
+          ? `OpenAI quota reached. Check your OpenAI plan and billing.${message ? ` (${message})` : ''}`
+          : `OpenAI rate limit reached.${message ? ` (${message})` : ''}`,
+        !quota,
+      );
     }
-    throw new ContactFinderError(`OpenAI error (HTTP ${status})${message ? `: ${message}` : ''}`);
+    throw new ContactFinderError(`OpenAI error (HTTP ${status})${message ? `: ${message}` : ''}`, status >= 500);
   }
 
   /** Checks the key and model without running a search. */
@@ -207,8 +257,13 @@ export class ContactFinder {
     return { message: `OpenAI key works and model "${this.model}" is available.` };
   }
 
-  async search(query: string, maxResults: number, exclude: readonly string[] = []): Promise<RawContact[]> {
-    this.logger.info('finder', 'Contact search started', { model: this.model, maxResults, excluded: exclude.length });
+  async search(query: string, maxResults: number, hints: SearchHints = {}, cancel?: AbortSignal): Promise<RawContact[]> {
+    this.logger.info('finder', 'Contact search started', {
+      model: this.model,
+      maxResults,
+      round: hints.round ?? 1,
+      excluded: hints.exclude?.length ?? 0,
+    });
     const { status, body } = await this.api(
       '/responses',
       {
@@ -216,15 +271,18 @@ export class ContactFinder {
         body: JSON.stringify({
           model: this.model,
           instructions: FINDER_INSTRUCTIONS,
-          input: buildSearchInput(query, maxResults, exclude),
+          input: buildSearchInput(query, maxResults, hints),
           tools: [{ type: 'web_search' }],
         }),
       },
       SEARCH_TIMEOUT_MS,
+      cancel,
     );
     if (status !== 200) this.fail(status, body);
     const state = (body as { status?: string })?.status;
-    if (state === 'failed') throw new ContactFinderError(`OpenAI could not finish the search${apiErrorMessage(body) ? `: ${apiErrorMessage(body)}` : '.'}`);
+    if (state === 'failed') {
+      throw new ContactFinderError(`OpenAI could not finish the search${apiErrorMessage(body) ? `: ${apiErrorMessage(body)}` : '.'}`, true);
+    }
     const text = responseText(body);
     const contacts = parseContactsJson(text);
     if (contacts.length === 0 && text && !/"contacts"\s*:\s*\[\s*\]/.test(text)) {
@@ -280,87 +338,133 @@ export class ContactFinder {
 
 /** Most people asked for in one search; larger requests are split over several searches. */
 export const PER_SEARCH_LIMIT = 25;
-
-/**
- * Searches allowed to reach `target`: enough for the target at PER_SEARCH_LIMIT each, plus 4 to
- * replace skipped results. 20 → 5 searches, 50 → 6, 100 → 8.
- */
-export function maxRoundsFor(target: number): number {
-  return Math.ceil(target / PER_SEARCH_LIMIT) + 4;
-}
+/** Searches in a row that add nobody new before the run stops: the web has no more matches. */
+export const STALL_LIMIT = 5;
+/** Tries per search when OpenAI has a temporary problem. */
+const MAX_TRIES = 4;
+const RETRY_BASE_MS = 5_000;
 
 export interface FinderRoundProgress {
   round: number;
-  maxRounds: number;
   found: number;
   target: number;
+  /** Searches in a row that found nobody new. */
+  emptyInARow: number;
 }
 
 type Searcher = Pick<ContactFinder, 'search' | 'checkOnPage'>;
 
+export interface FindOptions {
+  onProgress?: (p: FinderRoundProgress) => void;
+  logger?: AppLogger;
+  /** Aborted when the operator presses Cancel. */
+  signal?: AbortSignal;
+  stallLimit?: number;
+  sleepFn?: (ms: number) => Promise<void>;
+}
+
+function domainOf(email: string): string {
+  return email.split('@')[1]?.toLowerCase() ?? '';
+}
+
 /**
- * Searches repeatedly until `target` usable contacts are found. Results that are invalid, repeated,
- * already in the spreadsheet or not on their source page do not count, and the next round asks for
- * the missing number (at most PER_SEARCH_LIMIT at a time) while excluding every email seen so far.
- * Stops after `maxRounds`, or after two
- * rounds in a row that add nobody.
+ * Searches until `target` usable contacts are found, with no fixed number of searches. Results that
+ * are invalid, repeated, already in the spreadsheet or not on their source page do not count; each
+ * new search asks for the missing number, excludes every email seen so far and is steered to other
+ * organizations and sources. Temporary OpenAI errors are retried. The run ends only when the target
+ * is reached, the operator cancels, a permanent error occurs, or `stallLimit` searches in a row add
+ * nobody new. Whatever was found is always returned.
  */
 export async function findUntilTarget(
   finder: Searcher,
   query: string,
   target: number,
   existing: ReadonlySet<string>,
-  options: { maxRounds?: number; onProgress?: (p: FinderRoundProgress) => void; logger?: AppLogger } = {},
+  options: FindOptions = {},
 ): Promise<Omit<FinderSearchResult, 'checkedAgainstSheet'>> {
-  const maxRounds = options.maxRounds ?? maxRoundsFor(target);
+  const stallLimit = options.stallLimit ?? STALL_LIMIT;
+  const sleepFn = options.sleepFn ?? ((ms: number) => new Promise<void>((r) => setTimeout(r, ms)));
   const accepted: FoundContact[] = [];
   const notOnPage: FoundContact[] = [];
   const dropped = { invalid: 0, noSource: 0, duplicate: 0, alreadyInSheet: 0, notOnPage: 0 };
   const seen = new Set<string>(); // every email returned so far, in any round
+  const organizations = new Set<string>();
   let rounds = 0;
   let emptyRounds = 0;
   let warning: string | undefined;
+  let stopped: FinderSearchResult['stopped'] = 'done';
 
-  while (accepted.length < target && rounds < maxRounds) {
-    rounds++;
-    const need = Math.min(target - accepted.length, PER_SEARCH_LIMIT);
-    let raw: RawContact[];
-    try {
-      raw = await finder.search(query, need, [...seen]);
-    } catch (error) {
-      // Keep what earlier rounds found; fail only when there is nothing to show.
-      if (accepted.length + notOnPage.length === 0) throw error;
-      warning = error instanceof Error ? error.message : String(error);
-      break;
-    }
+  const pause = async (ms: number) => {
+    if (options.signal?.aborted) throw new SearchCancelledError();
+    await sleepFn(ms);
+    if (options.signal?.aborted) throw new SearchCancelledError();
+  };
 
-    const fresh: RawContact[] = [];
-    for (const contact of raw) {
-      const key = contact.email.trim().toLowerCase();
-      if (key && seen.has(key)) dropped.duplicate++;
-      else fresh.push(contact);
-      if (key) seen.add(key);
-    }
-    const cleaned = cleanFoundContacts(fresh, existing, Number.MAX_SAFE_INTEGER);
-    dropped.invalid += cleaned.dropped.invalid;
-    dropped.noSource += cleaned.dropped.noSource;
-    dropped.duplicate += cleaned.dropped.duplicate;
-    dropped.alreadyInSheet += cleaned.dropped.alreadyInSheet;
+  try {
+    while (accepted.length < target) {
+      if (options.signal?.aborted) throw new SearchCancelledError();
+      rounds++;
+      const need = Math.min(target - accepted.length, PER_SEARCH_LIMIT);
+      const hints: SearchHints = { exclude: [...seen], organizations: [...organizations], round: rounds };
 
-    const before = accepted.length;
-    for (const contact of await finder.checkOnPage(cleaned.contacts)) {
-      if (contact.emailOnPage === 'no') {
-        dropped.notOnPage++;
-        notOnPage.push(contact);
-      } else if (accepted.length < target) {
-        accepted.push(contact);
+      let raw: RawContact[] = [];
+      for (let attempt = 1; ; attempt++) {
+        try {
+          raw = await finder.search(query, need, hints, options.signal);
+          break;
+        } catch (error) {
+          if (error instanceof SearchCancelledError) throw error;
+          const retryable = error instanceof ContactFinderError && error.retryable;
+          if (retryable && attempt < MAX_TRIES) {
+            options.logger?.warn('finder', `Search ${rounds} failed; trying again`, { attempt, reason: (error as Error).message });
+            await pause(RETRY_BASE_MS * 2 ** (attempt - 1));
+            continue;
+          }
+          throw error;
+        }
+      }
+
+      const fresh: RawContact[] = [];
+      for (const contact of raw) {
+        const key = contact.email.trim().toLowerCase();
+        if (key && seen.has(key)) dropped.duplicate++;
+        else fresh.push(contact);
+        if (key) seen.add(key);
+      }
+      const cleaned = cleanFoundContacts(fresh, existing, Number.MAX_SAFE_INTEGER);
+      dropped.invalid += cleaned.dropped.invalid;
+      dropped.noSource += cleaned.dropped.noSource;
+      dropped.duplicate += cleaned.dropped.duplicate;
+      dropped.alreadyInSheet += cleaned.dropped.alreadyInSheet;
+
+      const before = accepted.length;
+      for (const contact of await finder.checkOnPage(cleaned.contacts)) {
+        organizations.add(contact.organization.trim() || domainOf(contact.email));
+        if (contact.emailOnPage === 'no') {
+          dropped.notOnPage++;
+          notOnPage.push(contact);
+        } else if (accepted.length < target) {
+          accepted.push(contact);
+        }
+      }
+      emptyRounds = accepted.length === before ? emptyRounds + 1 : 0;
+      options.onProgress?.({ round: rounds, found: accepted.length, target, emptyInARow: emptyRounds });
+      options.logger?.info('finder', `Search ${rounds}: ${accepted.length} of ${target} found`);
+      if (accepted.length < target && emptyRounds >= stallLimit) {
+        stopped = 'no_more_results';
+        break;
       }
     }
-    options.onProgress?.({ round: rounds, maxRounds, found: accepted.length, target });
-    options.logger?.info('finder', `Search round ${rounds}: ${accepted.length} of ${target} found`);
-    emptyRounds = accepted.length === before ? emptyRounds + 1 : 0;
-    if (emptyRounds >= 2) break;
+  } catch (error) {
+    if (error instanceof SearchCancelledError) {
+      stopped = 'cancelled';
+    } else {
+      // Keep what earlier searches found; fail only when there is nothing to show.
+      if (accepted.length + notOnPage.length === 0) throw error;
+      stopped = 'error';
+      warning = error instanceof Error ? error.message : String(error);
+    }
   }
 
-  return { contacts: [...accepted, ...notOnPage], dropped, rounds, target, found: accepted.length, warning };
+  return { contacts: [...accepted, ...notOnPage], dropped, rounds, target, found: accepted.length, stopped, warning };
 }

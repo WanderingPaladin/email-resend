@@ -41,8 +41,32 @@ export function removeKnownEmails(
 export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
   handle(deps, IPC.openaiValidate, null, () => ctx.createFinder().validate());
 
+  // The running search, so Cancel can stop it. Only one search runs at a time.
+  let running: AbortController | null = null;
+
+  handle(deps, IPC.finderCancel, null, () => {
+    running?.abort();
+    return Boolean(running);
+  });
+
   handle(deps, IPC.finderSearch, finderSearchInputSchema, async ({ query, maxResults }): Promise<FinderSearchResult> => {
+    if (running) throw new Error('A search is already running.');
     const finder = ctx.createFinder();
+    const controller = new AbortController();
+    running = controller;
+    try {
+      return await runSearch(finder, query, maxResults, controller.signal);
+    } finally {
+      running = null;
+    }
+  });
+
+  const runSearch = async (
+    finder: ReturnType<AppContext['createFinder']>,
+    query: string,
+    maxResults: number,
+    signal: AbortSignal,
+  ): Promise<FinderSearchResult> => {
 
     // Leave out people who are already in any tab of the spreadsheet.
     let existing = new Set<string>();
@@ -60,11 +84,12 @@ export function registerFinderIpc(ctx: AppContext, deps: IpcDeps): void {
 
     const result = await findUntilTarget(finder, query, maxResults, existing, {
       logger: ctx.logger,
+      signal,
       onProgress: (progress) => broadcast(IPC.finderProgress, progress),
     });
-    ctx.logger.info('finder', `Contact search finished: ${result.found} of ${maxResults} in ${result.rounds} round(s)`, result.dropped);
+    ctx.logger.info('finder', `Contact search finished (${result.stopped}): ${result.found} of ${maxResults} in ${result.rounds} search(es)`, result.dropped);
     return { ...result, checkedAgainstSheet };
-  });
+  };
 
   handle(deps, IPC.finderTabs, null, () => ctx.createSheets().listWorksheets());
 
