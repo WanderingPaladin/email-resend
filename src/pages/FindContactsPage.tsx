@@ -310,7 +310,7 @@ export function FindContactsPage({
             </button>
             .{' '}
             Skipped results (already in your spreadsheet, repeated, invalid, or not on their page) do not count: the app keeps searching
-            until it has your number (up to 100). It stops early only if you press Cancel or 5 searches in a row find nobody new. Saved contacts get Batch Flag New, so they are sent in the next campaign on that tab: untick anyone you are not authorized to email
+            until it has your number (up to 1,000). It stops early only if you press Cancel or 5 searches in a row find nobody new. Saved contacts get Batch Flag New, so they are sent in the next campaign on that tab: untick anyone you are not authorized to email
             before saving.
           </p>
         </CardBody>

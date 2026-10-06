@@ -110,9 +110,10 @@ describe('contact selection', () => {
   });
 
   it('never selects more than MAX_BATCH_SIZE, even when asked for more', () => {
-    const many = Array.from({ length: 250 }, (_, i) => contact(`user${i}@example.com`));
+    const many = Array.from({ length: MAX_BATCH_SIZE + 50 }, (_, i) => contact(`user${i}@example.com`));
     const { contacts } = parseContacts(rows(headers, many));
-    expect(selectContacts(contacts, 1000).selected).toHaveLength(MAX_BATCH_SIZE);
+    expect(selectContacts(contacts, MAX_BATCH_SIZE + 1000).selected).toHaveLength(MAX_BATCH_SIZE);
+    expect(selectContacts(contacts, 250).selected).toHaveLength(250);
     expect(selectContacts(contacts, 100).selected).toHaveLength(100);
     expect(selectContacts(contacts, 7).selected).toHaveLength(7);
     expect(clampBatchSize(0)).toBe(1);

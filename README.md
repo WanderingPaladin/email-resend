@@ -11,7 +11,7 @@ duplicate sends, to survive crashes and partial failures, and to be easy to debu
 ## Features
 
 - Google Sheets and email provider (Resend, Elastic Email or Mailjet) configuration, with credentials encrypted by the operating system (`safeStorage`)
-- Contact preview (up to 100 per campaign), template variables
+- Contact preview, with your own limit on emails per campaign (1 to 10,000, default 100), template variables
 - Email editor with Visual (formatted), HTML code and Plain text modes, and a live rendered preview
 - Test email, dry run, confirmation step, live progress, cancel, results table
 - Controlled concurrency (`p-limit`) and a send-rate throttle for the provider's rate limit
@@ -154,7 +154,7 @@ saves them to a new tab of your spreadsheet.
    were skipped.
    Skipped results (already in the spreadsheet, repeated, invalid, or not on their page) do not
    count. The app keeps searching, with no fixed number of searches, until it has the number you
-   asked for (up to 100; each search asks for at most 25). Every new search is told which emails and
+   asked for (up to 1,000; each search asks for at most 25). Every new search is told which emails and
    organizations were already found and is steered to other sources. Temporary OpenAI errors (rate
    limit, timeout) are retried. The run ends early only when you press **Cancel** (you keep what was
    found), on a permanent OpenAI error such as no credits, or when 5 searches in a row find nobody

@@ -5,8 +5,8 @@
 
 export const APP_NAME = 'Email Sender';
 
-/** Hard upper bound on contacts per campaign. Enforced in the main process. */
-export const MAX_BATCH_SIZE = 100;
+/** Upper bound on the number of emails per campaign the operator can choose. Enforced in the main process. */
+export const MAX_BATCH_SIZE = 10_000;
 export const MIN_BATCH_SIZE = 1;
 export const DEFAULT_BATCH_SIZE = 100;
 
@@ -138,6 +138,6 @@ export const IPC = {
 /** Default OpenAI model for contact search. Any model that supports the web_search tool works. */
 export const DEFAULT_OPENAI_MODEL = 'gpt-6.1-sol';
 /** Most contacts one Find Contacts run can collect (same as the campaign batch limit). */
-export const MAX_FINDER_RESULTS = 100;
+export const MAX_FINDER_RESULTS = 1_000;
 /** Columns of a tab created from search results. Saved contacts get Batch Flag New. */
 export const FINDER_TAB_HEADERS = ['Name', 'Email', 'Organization', 'Role', 'Source URL', 'Email on page', 'Batch Flag'] as const;

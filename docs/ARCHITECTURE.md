@@ -24,7 +24,7 @@ Main process (electron/)         Zod-validated IPC handlers → services
 | Email provider keys (Resend, Elastic Email, Mailjet API + secret), Google private key | Main process only | Encrypted with `safeStorage` (DPAPI / Keychain / libsecret) before being written to `settings.json`. Never sent to the renderer: the renderer only sees `has…` flags. |
 | Service account JSON | Main process | Chosen through a native file dialog opened by the main process; only `client_email` and the encrypted `private_key` are kept. The file itself is not copied. |
 | IPC | `electron/ipc/*` | Every payload is parsed with a Zod schema (`shared/schemas.ts`); the sender frame must be the app's own page. Handlers return `{ ok, data \| error }`. |
-| Limits | `campaign.service.ts`, `sheet-parser.ts` | Batch size is clamped to 100 and concurrency to 1–10 in the main process, independently of the IPC schema. |
+| Limits | `campaign.service.ts`, `sheet-parser.ts` | The email limit (batch size) is clamped to 1–10,000 and concurrency to 1–10 in the main process, independently of the IPC schema. |
 | Email editor and preview | `HtmlVisualEditor.tsx` | The email's HTML is shown only inside sandboxed iframes without `allow-scripts`: nothing in it can run, and its CSS cannot affect the app. |
 | Renderer | `BrowserWindow` | `contextIsolation: true`, `nodeIntegration: false`, `sandbox: true`, no `remote`, no webviews, navigation and new windows blocked, all permission requests denied, strict CSP (header + meta tag), DevTools disabled in packaged builds. |
 | Logs | `logger.service.ts` + `log-format.ts` | Every message and field passes through redaction: provider API keys, PEM private keys, bearer tokens and secret-named fields are replaced; email addresses are masked (`ma***@example.com`). |
@@ -56,7 +56,7 @@ startCampaign()
   ├─ read sheet once, parse headers by name
   ├─ ensure tracking columns (only with operator confirmation)
   ├─ selectContacts(): Batch Flag = New, email not empty (empty rows are ignored), valid email,
-  │                    no previous send, not awaiting manual review, no duplicate email, max 100
+  │                    no previous send, not awaiting manual review, no duplicate email, up to the email limit
   ├─ reserve all selected rows in ONE batch write: Batch Flag=Processing, send_status=processing, campaign_id
   │    (each row re-verified against a fresh read: still New, same email)
   └─ run in background with p-limit(concurrency)

@@ -8,7 +8,13 @@ const SKIP_LABELS: Record<SkippedContact['reason'], string> = {
   email_already_sent_elsewhere: 'Sent in another row',
 };
 
+/** Rows drawn in the table; a large campaign lists only the first ones so the page stays fast. */
+const MAX_ROWS_SHOWN = 500;
+
 export function ContactsPreview({ preview }: { preview: PreviewResult }) {
+  const shown = preview.selected.slice(0, MAX_ROWS_SHOWN);
+  const skippedShown = preview.skipped.slice(0, Math.max(0, MAX_ROWS_SHOWN - shown.length));
+  const hidden = preview.selected.length + preview.skipped.length - shown.length - skippedShown.length;
   return (
     <div className="space-y-3">
       <div className="flex gap-6 text-sm">
@@ -17,7 +23,7 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
           <span className="ml-1.5 text-slate-600">total New contacts</span>
         </div>
         <div>
-          <span className="text-lg font-semibold tabular-nums">{preview.selected.length}</span>
+          <span className="text-lg font-semibold tabular-nums">{preview.selected.length.toLocaleString()}</span>
           <span className="ml-1.5 text-slate-600">contacts selected for this campaign</span>
         </div>
         {preview.skipped.length > 0 && (
@@ -49,7 +55,7 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
             </tr>
           </thead>
           <tbody className="divide-y divide-slate-100">
-            {preview.selected.map((c) => (
+            {shown.map((c) => (
               <tr key={c.sheetRow}>
                 <td className="px-3 py-1.5 tabular-nums text-slate-500">{c.sheetRow}</td>
                 <td className="px-3 py-1.5">{c.firstName || <span className="text-slate-400">(empty)</span>}</td>
@@ -60,7 +66,7 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
                 </td>
               </tr>
             ))}
-            {preview.skipped.map((s) => (
+            {skippedShown.map((s) => (
               <tr key={`skip-${s.sheetRow}`} className="bg-slate-50/60 text-slate-500">
                 <td className="px-3 py-1.5 tabular-nums">{s.sheetRow}</td>
                 <td className="px-3 py-1.5">{s.firstName}</td>
@@ -74,6 +80,7 @@ export function ContactsPreview({ preview }: { preview: PreviewResult }) {
           </tbody>
         </table>
       </div>
+      {hidden > 0 && <p className="text-xs text-slate-500">{`Showing the first ${MAX_ROWS_SHOWN} rows; ${hidden.toLocaleString()} more are included but not listed.`}</p>}
     </div>
   );
 }

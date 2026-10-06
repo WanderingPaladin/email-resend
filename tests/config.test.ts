@@ -21,7 +21,8 @@ describe('configuration validation', () => {
   });
 
   it('rejects out-of-range limits', () => {
-    expect(settingsSchema.safeParse({ batchSize: 101 }).success).toBe(false);
+    expect(settingsSchema.safeParse({ batchSize: 5000 }).success).toBe(true);
+    expect(settingsSchema.safeParse({ batchSize: 10_001 }).success).toBe(false);
     expect(settingsSchema.safeParse({ batchSize: 0 }).success).toBe(false);
     expect(settingsSchema.safeParse({ concurrency: 11 }).success).toBe(false);
     expect(settingsSchema.safeParse({ concurrency: 1.5 }).success).toBe(false);
@@ -30,13 +31,14 @@ describe('configuration validation', () => {
   it('validates campaign start payloads from the renderer', () => {
     const base = { fromName: 'Julio', fromEmail: 'julio@example.com', subject: 'Hi', body: 'Hi {{first_name}}', bodyFormat: 'text', batchSize: 100, concurrency: 5, dryRun: false };
     expect(campaignStartInputSchema.safeParse(base).success).toBe(true);
-    expect(campaignStartInputSchema.safeParse({ ...base, batchSize: 1000 }).success).toBe(false);
+    expect(campaignStartInputSchema.safeParse({ ...base, batchSize: 1000 }).success).toBe(true);
+    expect(campaignStartInputSchema.safeParse({ ...base, batchSize: 10_001 }).success).toBe(false);
     expect(campaignStartInputSchema.safeParse({ ...base, concurrency: 50 }).success).toBe(false);
     expect(campaignStartInputSchema.safeParse({ ...base, fromEmail: 'nope' }).success).toBe(false);
     expect(campaignStartInputSchema.safeParse({ ...base, subject: '   ' }).success).toBe(false);
     expect(campaignStartInputSchema.safeParse({ ...base, bodyFormat: 'js' }).success).toBe(false);
     expect(sendTestInputSchema.safeParse({ ...base, to: 'not-email' }).success).toBe(false);
-    expect(saveConfigInputSchema.safeParse({ settings: { batchSize: 500 } }).success).toBe(false);
+    expect(saveConfigInputSchema.safeParse({ settings: { batchSize: 50_000 } }).success).toBe(false);
   });
 });
 
@@ -110,7 +112,7 @@ describe('ConfigService', () => {
   });
 
   it('falls back to defaults for corrupted stored values', () => {
-    const repo = createMemorySettingsRepository({ settings: { batchSize: 9999 as number, fromName: 'Julio' } });
+    const repo = createMemorySettingsRepository({ settings: { batchSize: 99_999 as number, fromName: 'Julio' } });
     const config = new ConfigService(repo, fakeCipher(), new MemoryLogger());
     expect(config.getSettings()).toMatchObject({ batchSize: 100, fromName: 'Julio' });
   });

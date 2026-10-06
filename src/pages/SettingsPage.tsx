@@ -117,7 +117,7 @@ function CampaignDefaults({ configHook }: { configHook: ConfigHook }) {
       <CardHeader title="Campaign Defaults" />
       <CardBody className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
-          <Field label="Batch Size" hint={`${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE}`}>
+          <Field label="Email limit per campaign" hint={`${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE.toLocaleString()}`}>
             <Input type="number" min={MIN_BATCH_SIZE} max={MAX_BATCH_SIZE} value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
           </Field>
           <Field label="Concurrency" hint={`${MIN_CONCURRENCY}–${MAX_CONCURRENCY} parallel sends`}>

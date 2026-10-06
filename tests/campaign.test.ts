@@ -233,12 +233,12 @@ describe('duplicate-send protection', () => {
 describe('limits', () => {
   const many = Array.from({ length: 150 }, (_, i) => ({ first_name: `U${i}`, email: `user${i}@example.com`, tag: 'New' }));
 
-  it('never sends more than 100 per campaign even if the input bypasses validation', async () => {
+  it('sends up to the chosen email limit, which can be above 100', async () => {
     const t = setup(sheetRows(many));
-    const { summary } = await t.run({ batchSize: 500 });
-    expect(summary.selected).toBe(100);
-    expect(t.client.calls).toHaveLength(100);
-    expect(t.gateway.rowObject(102)['tag']).toBe('New');
+    const { summary } = await t.run({ batchSize: 120 });
+    expect(summary.selected).toBe(120);
+    expect(t.client.calls).toHaveLength(120);
+    expect(t.gateway.rowObject(122)['tag']).toBe('New');
   });
 
   it('limits concurrent sends', async () => {

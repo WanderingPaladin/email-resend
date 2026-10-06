@@ -164,8 +164,8 @@ describe('saving results to a new tab', () => {
     expect(finderSaveInputSchema.safeParse({ tabName: 'Bad/Name', contacts }).success).toBe(false);
     expect(finderSaveInputSchema.safeParse({ tabName: 'Good', contacts: [] }).success).toBe(false);
     expect(finderSaveInputSchema.safeParse({ tabName: 'Good', contacts }).success).toBe(true);
-    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 101 }).success).toBe(false);
-    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 100 }).success).toBe(true);
+    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 1001 }).success).toBe(false);
+    expect(finderSearchInputSchema.safeParse({ query: 'HR managers', maxResults: 500 }).success).toBe(true);
     expect(finderSearchInputSchema.parse({ query: 'HR managers' }).maxResults).toBe(20);
   });
 

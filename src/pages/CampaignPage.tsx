@@ -244,7 +244,7 @@ export function CampaignPage({
             <Field label="From Email">
               <Input value={form.fromEmail} disabled={locked} onChange={(e) => update('fromEmail', e.target.value)} />
             </Field>
-            <Field label="Batch Size" hint={`${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE}`}>
+            <Field label="Email limit" hint={`Emails this campaign sends at most (${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE.toLocaleString()})`}>
               <Input
                 type="number"
                 min={MIN_BATCH_SIZE}
