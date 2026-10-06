@@ -90,7 +90,10 @@ export interface PreviewResult {
 
 export interface GoogleTestResult {
   spreadsheetTitle: string;
+  /** The campaign tab, chosen on the Campaign page. */
   worksheetName: string;
+  /** False when the campaign tab is not in the spreadsheet; the counts below are then 0. */
+  worksheetFound: boolean;
   worksheets: string[];
   /** Rows with anything in the Name, Email, Batch Flag or tracking columns. */
   rowCount: number;
@@ -103,6 +106,16 @@ export interface GoogleTestResult {
   /** Header labels of the tracking columns found on the sheet. */
   trackingColumns: string[];
   missingTrackingColumns: string[];
+}
+
+export interface EmailTemplate {
+  id: string;
+  name: string;
+  subject: string;
+  body: string;
+  bodyFormat: 'text' | 'html';
+  /** ISO time of the last save. */
+  updatedAt: string;
 }
 
 export interface MailerValidationResult {

@@ -1,7 +1,7 @@
 # Email Sender
 
 A desktop utility (Electron + React + TypeScript) that reads contacts whose **Batch Flag** is **New**
-from the `Emails` worksheet of a Google Sheet, sends each one a personalized email through
+from a tab of a Google Sheet (chosen on the Campaign page, `Emails` by default), sends each one a personalized email through
 [Resend](https://resend.com), [Elastic Email](https://elasticemail.com) or [Mailjet](https://www.mailjet.com),
 and marks the row **Sent** or **Failed**. It is built to avoid
 duplicate sends, to survive crashes and partial failures, and to be easy to debug through logs.
@@ -91,8 +91,8 @@ calls are made.
    (it looks like `name@project.iam.gserviceaccount.com`).
 10. Give it **Editor** permission, because the app updates each contact's status.
 
-Then fill in **Spreadsheet ID** (the long ID in the sheet URL, or paste the whole URL) and
-**Worksheet Name** (default `Emails`), click **Save** and **Test Google Sheets**.
+Then fill in **Spreadsheet ID** (the long ID in the sheet URL, or paste the whole URL), click
+**Save** and **Test Google Sheets**. The tab to send from is chosen on the Campaign page.
 
 ## Email provider setup
 
@@ -178,7 +178,7 @@ latest 30 searches are also kept on this computer under **Recent searches**, so 
 again (even after restarting the app) and save it to the sheet later.
 
 Saved contacts get Batch Flag **New**, so they are included in the next campaign on that tab (for
-example your Emails tab, or a new tab chosen as the worksheet in Settings). Untick anyone you are
+example your Emails tab, or a new tab chosen on the Campaign page). Untick anyone you are
 not authorized to email before saving.
 
 ### Search costs
@@ -199,7 +199,10 @@ searches) and can be cleared on that page.
 ## Workflow
 
 1. **Settings**: configure Google Sheets and the email provider, then test both connections.
-2. **Campaign**: write the subject and body. Variables: `{{first_name}}`, `{{last_name}}`, `{{email}}`.
+2. **Campaign**: choose the sheet **tab** to send from (next to Preview Contacts; it is remembered,
+   and Sent/Failed are written back to that tab). Pick a saved **Template** to fill in the subject
+   and body, or write them and click **Save as New Template**; **Update** saves your changes to the
+   chosen template. Templates are kept on this computer. Then write or adjust the subject and body. Variables: `{{first_name}}`, `{{last_name}}`, `{{email}}`.
    Use **Visual** to format the email like a document (bold, headings, lists, links, colors),
    **HTML code** to paste or edit HTML directly, or **Plain text**. The preview shows the email
    exactly as it will be sent, with the first previewed contact's details.

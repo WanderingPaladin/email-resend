@@ -29,4 +29,13 @@ describe('Google Sheets connection test', () => {
     expect(message).toContain('Required column(s) missing from the header row: Email.');
     expect(message).not.toContain('Location');
   });
+
+  it('still connects when the campaign tab is missing, and lists the tabs', async () => {
+    const gateway = new FakeSheetsGateway([['Name', 'Email', 'Batch Flag']]);
+    const sheets = new GoogleSheetsService(gateway, { spreadsheetId: 's', worksheetName: 'Old tab', serviceAccountEmail: '' }, new MemoryLogger(), { sleepFn: noSleep });
+    const result = await sheets.testConnection();
+    expect(result.worksheetFound).toBe(false);
+    expect(result.worksheets).toContain('Emails');
+    expect(result.rowCount).toBe(0);
+  });
 });

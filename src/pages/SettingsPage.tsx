@@ -58,7 +58,7 @@ export function SettingsPage({ configHook, onSaved }: { configHook: ConfigHook; 
               },
               {
                 label: 'Spreadsheet',
-                value: config?.settings.spreadsheetId ? `Worksheet "${config.settings.worksheetName}"` : 'Not set',
+                value: config?.settings.spreadsheetId ? 'Set' : 'Not set',
                 tone: config?.settings.spreadsheetId ? 'success' : 'neutral',
               },
             ]}

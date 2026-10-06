@@ -10,7 +10,6 @@ import { api, errorMessage } from '@/lib/utils';
 export function GoogleSheetSettings({ configHook, onSaved }: { configHook: ConfigHook; onSaved: () => void }) {
   const { config, save, importServiceAccount } = configHook;
   const [spreadsheetId, setSpreadsheetId] = useState('');
-  const [worksheetName, setWorksheetName] = useState('');
   const [serviceAccountEmail, setServiceAccountEmail] = useState('');
   // The stored private key is never sent to the renderer. This field only accepts a new one.
   const [privateKey, setPrivateKey] = useState('');
@@ -24,10 +23,9 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
   useEffect(() => {
     if (!stored) return;
     setSpreadsheetId(stored.spreadsheetId);
-    setWorksheetName(stored.worksheetName);
     setServiceAccountEmail(stored.serviceAccountEmail);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [stored?.spreadsheetId, stored?.worksheetName, stored?.serviceAccountEmail]);
+  }, [stored?.spreadsheetId, stored?.serviceAccountEmail]);
 
   const run = async (kind: typeof busy, fn: () => Promise<void>) => {
     setBusy(kind);
@@ -44,7 +42,7 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
   const onSave = () =>
     run('save', async () => {
       await save({
-        settings: { spreadsheetId: extractSpreadsheetId(spreadsheetId), worksheetName, serviceAccountEmail },
+        settings: { spreadsheetId: extractSpreadsheetId(spreadsheetId), serviceAccountEmail },
         ...(privateKey.trim() ? { googlePrivateKey: privateKey } : {}),
       });
       setPrivateKey('');
@@ -87,14 +85,9 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
         }
       />
       <CardBody className="space-y-4">
-        <div className="grid grid-cols-2 gap-4">
-          <Field label="Spreadsheet ID" hint="The long ID from the sheet URL. You can paste the whole URL.">
-            <Input value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} placeholder="1AbC…" />
-          </Field>
-          <Field label="Worksheet Name">
-            <Input value={worksheetName} onChange={(e) => setWorksheetName(e.target.value)} placeholder="Emails" />
-          </Field>
-        </div>
+        <Field label="Spreadsheet ID" hint="The long ID from the sheet URL. You can paste the whole URL. Choose the tab to send from on the Campaign page.">
+          <Input value={spreadsheetId} onChange={(e) => setSpreadsheetId(e.target.value)} placeholder="1AbC…" />
+        </Field>
         <Field label="Service Account Email">
           <Input
             value={serviceAccountEmail}
@@ -122,11 +115,20 @@ export function GoogleSheetSettings({ configHook, onSaved }: { configHook: Confi
         </Field>
 
         {message && <Alert tone={message.tone}>{message.text}</Alert>}
-        {test && (
+        {test && !test.worksheetFound && (
           <Alert tone="success" title="Connected successfully.">
             {[
               `Spreadsheet: ${test.spreadsheetTitle}`,
-              `Worksheet: ${test.worksheetName}`,
+              `Tabs: ${test.worksheets.join(', ') || '(none)'}`,
+              'Choose the tab to send from on the Campaign page.',
+            ].join('\n')}
+          </Alert>
+        )}
+        {test && test.worksheetFound && (
+          <Alert tone="success" title="Connected successfully.">
+            {[
+              `Spreadsheet: ${test.spreadsheetTitle}`,
+              `Campaign tab: ${test.worksheetName} (change it on the Campaign page)`,
               `Columns used: ${test.columns.name} (name), ${test.columns.email} (email), ${test.columns.status} (status)`,
               `Tracking columns: ${test.trackingColumns.length > 0 ? test.trackingColumns.join(', ') : 'none yet'}`,
               `Rows: ${test.rowCount.toLocaleString()}`,

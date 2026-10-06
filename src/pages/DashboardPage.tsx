@@ -47,7 +47,7 @@ export function DashboardPage({
   const rows: StatusRow[] = [
     status?.googleConfigured
       ? google
-        ? { label: 'Google Sheets', value: 'Connected', tone: 'success', detail: `${google.spreadsheetTitle} / ${google.worksheetName}` }
+        ? { label: 'Google Sheets', value: 'Connected', tone: 'success', detail: google.worksheetFound ? `${google.spreadsheetTitle} / ${google.worksheetName}` : `${google.spreadsheetTitle}. Choose the tab on the Campaign page.` }
         : googleError
           ? { label: 'Google Sheets', value: 'Error', tone: 'error', detail: googleError }
           : { label: 'Google Sheets', value: checking ? 'Checking…' : 'Configured', tone: 'neutral' }
@@ -109,7 +109,11 @@ export function DashboardPage({
           <CardBody>
             <div className="text-4xl font-semibold tabular-nums">{google ? google.newCount.toLocaleString() : '—'}</div>
             <div className="mt-1 text-xs text-slate-500">
-              {google ? `of ${google.rowCount.toLocaleString()} rows in "${google.worksheetName}"` : 'Connect Google Sheets to count contacts.'}
+              {google
+                ? google.worksheetFound
+                  ? `of ${google.rowCount.toLocaleString()} rows in "${google.worksheetName}"`
+                  : `Tab "${google.worksheetName}" not found. Choose the tab on the Campaign page.`
+                : 'Connect Google Sheets to count contacts.'}
             </div>
           </CardBody>
         </Card>

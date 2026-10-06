@@ -35,6 +35,7 @@ const api: EmailAppApi = {
   google: {
     testConnection: () => invoke(IPC.googleTest),
     initializeTrackingColumns: () => invoke(IPC.googleInitColumns),
+    listTabs: () => invoke(IPC.googleTabs),
     previewContacts: (batchSize) => invoke(IPC.contactsPreview, { batchSize }),
   },
   finder: {
@@ -50,6 +51,11 @@ const api: EmailAppApi = {
     openSaved: (id) => invoke(IPC.finderOpenSaved, { id }),
     usage: () => invoke(IPC.finderUsage),
     clearUsage: () => invoke(IPC.finderUsageClear),
+  },
+  templates: {
+    list: () => invoke(IPC.templatesList),
+    save: (input) => invoke(IPC.templatesSave, input),
+    delete: (id) => invoke(IPC.templatesDelete, { id }),
   },
   mailer: {
     validate: () => invoke(IPC.mailerValidate),

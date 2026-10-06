@@ -1,6 +1,6 @@
 import Store from 'electron-store';
 import type { Settings } from '../../shared/schemas';
-import type { CampaignHistoryEntry, ManualReviewItem, SavedFinderSearch } from '../../shared/types';
+import type { CampaignHistoryEntry, EmailTemplate, ManualReviewItem, SavedFinderSearch } from '../../shared/types';
 import type { FinderUsageRecord } from '../../shared/usage';
 
 /** Encrypted secrets, stored as base64 of safeStorage ciphertext. Never plain text. */
@@ -29,6 +29,8 @@ export interface StoreSchema {
   finderUsage: FinderUsageRecord[];
   /** Results of the latest Find Contacts searches, oldest first. */
   finderResults: SavedFinderSearch[];
+  /** Saved email templates, in the order they were created. */
+  templates: EmailTemplate[];
 }
 
 /** Small persistence abstraction so services can be tested without Electron. */
@@ -45,6 +47,7 @@ const DEFAULTS: StoreSchema = {
   activeCampaign: null,
   finderUsage: [],
   finderResults: [],
+  templates: [],
 };
 
 /** electron-store writes JSON atomically to <userData>/settings.json. */

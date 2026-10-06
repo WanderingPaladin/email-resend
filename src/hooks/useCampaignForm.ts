@@ -11,6 +11,8 @@ export interface CampaignForm {
   concurrency: number;
   dryRun: boolean;
   testRecipient: string;
+  /** Saved template the subject and body were loaded from ('' when none). */
+  templateId: string;
 }
 
 const EMPTY: CampaignForm = {
@@ -23,6 +25,7 @@ const EMPTY: CampaignForm = {
   concurrency: 5,
   dryRun: true,
   testRecipient: '',
+  templateId: '',
 };
 
 /** Campaign draft kept at the app root so it survives page changes. Seeded from saved defaults. */

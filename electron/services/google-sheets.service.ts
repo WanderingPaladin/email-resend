@@ -330,10 +330,23 @@ export class GoogleSheetsService {
     const meta = await this.call('metadata read', () => this.gateway.getSpreadsheet(this.target.spreadsheetId));
     const worksheets = meta.sheets.map((s) => s.title);
     if (!worksheets.includes(this.target.worksheetName)) {
-      throw new GoogleSheetsError(
-        `Worksheet "${this.target.worksheetName}" was not found. Available worksheets: ${worksheets.join(', ') || '(none)'}.`,
-        'worksheet_not_found',
-      );
+      // The spreadsheet is reachable; the tab is chosen on the Campaign page.
+      this.logger.info('google', 'Google Sheets connection successful; campaign tab not found', {
+        spreadsheet: meta.title,
+        worksheet: this.target.worksheetName,
+      });
+      return {
+        spreadsheetTitle: meta.title,
+        worksheetName: this.target.worksheetName,
+        worksheetFound: false,
+        worksheets,
+        rowCount: 0,
+        newCount: 0,
+        newWithoutEmailCount: 0,
+        columns: { name: '', email: '', status: '' },
+        trackingColumns: [],
+        missingTrackingColumns: [],
+      };
     }
     const snapshot = await this.readSheet();
     const newRows = snapshot.contacts.filter((c) => isNewTag(c.tag));
@@ -346,6 +359,7 @@ export class GoogleSheetsService {
     return {
       spreadsheetTitle: meta.title,
       worksheetName: this.target.worksheetName,
+      worksheetFound: true,
       worksheets,
       rowCount: snapshot.contacts.length,
       newCount: withEmail,

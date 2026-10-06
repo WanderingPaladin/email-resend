@@ -80,6 +80,7 @@ export function App() {
           {page === 'campaign' && (
             <CampaignPage
               config={configHook.config}
+              saveConfig={configHook.save}
               formHook={formHook}
               campaign={campaign}
               logs={logs.entries}

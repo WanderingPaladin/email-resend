@@ -1,5 +1,5 @@
 import type { FinderUsageRecord } from './usage';
-import type { CampaignStartInput, FinderSaveInput, FinderSearchInput, SaveConfigInput, SendTestInput, RecoveryApplyInput } from './schemas';
+import type { CampaignStartInput, TemplateSaveInput, FinderSaveInput, FinderSearchInput, SaveConfigInput, SendTestInput, RecoveryApplyInput } from './schemas';
 import type {
   AppStatus,
   CampaignHistoryEntry,
@@ -8,6 +8,7 @@ import type {
   CampaignState,
   CampaignSummary,
   ConfigView,
+  EmailTemplate,
   FinderProgress,
   FinderRunState,
   SavedFinderSearch,
@@ -43,6 +44,8 @@ export interface EmailAppApi {
   google: {
     testConnection(): Promise<GoogleTestResult>;
     initializeTrackingColumns(): Promise<{ added: string[] }>;
+    /** Tab names of the spreadsheet, for choosing the campaign tab. */
+    listTabs(): Promise<string[]>;
     previewContacts(batchSize: number): Promise<PreviewResult>;
   };
   finder: {
@@ -69,6 +72,13 @@ export interface EmailAppApi {
     usage(): Promise<FinderUsageRecord[]>;
     /** Deletes the saved cost history. */
     clearUsage(): Promise<boolean>;
+  };
+  templates: {
+    /** Saved email templates, sorted by name. */
+    list(): Promise<EmailTemplate[]>;
+    /** Creates a template, or updates it when id is given. */
+    save(input: TemplateSaveInput): Promise<EmailTemplate>;
+    delete(id: string): Promise<boolean>;
   };
   mailer: {
     /** Checks the selected provider's credentials without sending an email. */

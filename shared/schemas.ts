@@ -133,6 +133,19 @@ export const emailContentSchema = z.object({
 
 export type EmailContent = z.infer<typeof emailContentSchema>;
 
+/** A named email template saved for reuse in campaigns. */
+export const templateSaveInputSchema = z.object({
+  /** Updates the template with this id; omitted to create a new one. */
+  id: z.string().min(1).max(100).optional(),
+  name: z.string().trim().min(1, 'Template name is required').max(100),
+  subject: z.string().max(998),
+  body: z.string().max(100_000),
+  bodyFormat: bodyFormatSchema,
+});
+export type TemplateSaveInput = z.infer<typeof templateSaveInputSchema>;
+
+export const templateDeleteInputSchema = z.object({ id: z.string().min(1).max(100) });
+
 export const sendTestInputSchema = emailContentSchema.extend({
   to: z.email('Test recipient must be a valid email address'),
 });

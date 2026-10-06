@@ -96,6 +96,10 @@ export const IPC = {
 
   googleTest: 'google:test',
   googleInitColumns: 'google:init-columns',
+  googleTabs: 'google:tabs',
+  templatesList: 'templates:list',
+  templatesSave: 'templates:save',
+  templatesDelete: 'templates:delete',
   contactsPreview: 'contacts:preview',
 
   mailerValidate: 'mailer:validate',

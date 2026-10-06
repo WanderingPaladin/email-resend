@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import { MAX_BATCH_SIZE, MAX_CONCURRENCY, MIN_BATCH_SIZE, MIN_CONCURRENCY } from '@shared/constants';
+import type { SaveConfigInput } from '@shared/schemas';
 import { validateTemplate } from '@shared/template';
 import type { ConfigView, LogEntry, PreviewResult } from '@shared/types';
 import { ActivityPanel } from '@/components/ActivityPanel';
@@ -9,10 +10,11 @@ import { CampaignProgress } from '@/components/CampaignProgress';
 import { CampaignResults } from '@/components/CampaignResults';
 import { ContactsPreview } from '@/components/ContactsPreview';
 import { EmailTemplateEditor } from '@/components/EmailTemplateEditor';
+import { TemplatePicker } from '@/components/TemplatePicker';
 import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
-import { Checkbox, Field, Input } from '@/components/ui/form';
+import { Checkbox, Field, Input, Select } from '@/components/ui/form';
 import type { CampaignHook } from '@/hooks/useCampaign';
 import type { CampaignFormHook } from '@/hooks/useCampaignForm';
 import { api, errorMessage } from '@/lib/utils';
@@ -21,6 +23,7 @@ type Notice = { tone: 'success' | 'error' | 'warning' | 'info'; title?: string; 
 
 export function CampaignPage({
   config,
+  saveConfig,
   formHook,
   campaign,
   logs,
@@ -28,6 +31,7 @@ export function CampaignPage({
   onNavigate,
 }: {
   config: ConfigView | null;
+  saveConfig: (input: SaveConfigInput) => Promise<unknown>;
   formHook: CampaignFormHook;
   campaign: CampaignHook;
   logs: LogEntry[];
@@ -45,6 +49,25 @@ export function CampaignPage({
   const [startNotice, setStartNotice] = useState<Notice>(null);
 
   const locked = campaign.running;
+
+  // The sheet tab this campaign reads from and updates. Stored in settings so it is remembered.
+  const tab = config?.settings.worksheetName ?? '';
+  const googleReady = Boolean(config?.settings.spreadsheetId && config.settings.serviceAccountEmail && config.hasGooglePrivateKey);
+  const [tabs, setTabs] = useState<string[] | null>(null);
+  const [tabError, setTabError] = useState('');
+  const [switchingTab, setSwitchingTab] = useState(false);
+  const loadTabs = useCallback(async () => {
+    setTabError('');
+    try {
+      setTabs(await api().google.listTabs());
+    } catch (e) {
+      setTabs(null);
+      setTabError(errorMessage(e));
+    }
+  }, []);
+  useEffect(() => {
+    if (googleReady) void loadTabs();
+  }, [googleReady, config?.settings.spreadsheetId, loadTabs]);
 
   const loadPreview = useCallback(async (): Promise<PreviewResult | null> => {
     setPreviewing(true);
@@ -67,6 +90,23 @@ export function CampaignPage({
     // Only react to explicit "Preview Contacts" requests from the dashboard.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [autoPreview]);
+
+  const chooseTab = async (next: string) => {
+    if (!next || next === tab) return;
+    setSwitchingTab(true);
+    setPreview(null);
+    setPreviewError('');
+    try {
+      await saveConfig({ settings: { worksheetName: next } });
+    } catch (e) {
+      setPreviewError(errorMessage(e));
+      return;
+    } finally {
+      setSwitchingTab(false);
+    }
+    // Show the new tab's contacts (the preview reads the saved tab).
+    void loadPreview();
+  };
 
   const contentError = useMemo(() => {
     if (!form.fromName.trim()) return 'From Name is required.';
@@ -225,6 +265,19 @@ export function CampaignPage({
               />
             </Field>
           </div>
+          <TemplatePicker
+            templateId={form.templateId}
+            content={{ subject: form.subject, body: form.body, bodyFormat: form.bodyFormat }}
+            disabled={locked}
+            onLoad={(template) => {
+              update('templateId', template?.id ?? '');
+              if (template) {
+                update('subject', template.subject);
+                update('body', template.body);
+                update('bodyFormat', template.bodyFormat);
+              }
+            }}
+          />
           <EmailTemplateEditor
             subject={form.subject}
             body={form.body}
@@ -244,14 +297,37 @@ export function CampaignPage({
       <Card>
         <CardHeader
           title="Contacts"
-          description={`Rows whose Batch Flag is New in "${config?.settings.worksheetName ?? 'Emails'}", in sheet order.`}
+          description={`Rows whose Batch Flag is New in the chosen tab, in sheet order. Sent and Failed are written back to the same tab.`}
           actions={
-            <Button size="sm" variant="outline" onClick={() => void loadPreview()} loading={previewing}>
-              Preview Contacts
-            </Button>
+            <>
+              <Select
+                aria-label="Sheet tab"
+                className="w-56"
+                value={tab}
+                disabled={locked || switchingTab || !googleReady}
+                onChange={(e) => void chooseTab(e.target.value)}
+              >
+                {tabs && !tabs.includes(tab) && <option value={tab}>{tab ? `${tab} (not found)` : 'Choose a tab'}</option>}
+                {(tabs ?? [tab]).map((t) => (
+                  <option key={t} value={t}>
+                    {`Tab: ${t}`}
+                  </option>
+                ))}
+              </Select>
+              <Button size="sm" variant="ghost" disabled={!googleReady} onClick={() => void loadTabs()} title="Reload the list of tabs">
+                Refresh Tabs
+              </Button>
+              <Button size="sm" variant="outline" onClick={() => void loadPreview()} loading={previewing || switchingTab}>
+                Preview Contacts
+              </Button>
+            </>
           }
         />
         <CardBody>
+          {tabError && <Alert tone="error">{`Could not list the tabs: ${tabError}`}</Alert>}
+          {tabs && !tabs.includes(tab) && (
+            <Alert tone="warning">{`The tab "${tab}" is not in the spreadsheet. Choose the tab to send from.`}</Alert>
+          )}
           {previewError && <Alert tone="error">{previewError}</Alert>}
           {preview ? (
             <ContactsPreview preview={preview} />
