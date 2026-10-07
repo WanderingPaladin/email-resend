@@ -9,6 +9,8 @@ export const APP_NAME = 'Email Sender';
 export const MAX_BATCH_SIZE = 10_000;
 export const MIN_BATCH_SIZE = 1;
 export const DEFAULT_BATCH_SIZE = 100;
+/** Quick choices offered next to the batch size field; any other number can be typed. */
+export const BATCH_SIZE_CHOICES = [100, 250, 500, 1_000, 2_500, 5_000, 10_000] as const;
 
 export const MIN_CONCURRENCY = 1;
 export const MAX_CONCURRENCY = 10;

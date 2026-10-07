@@ -1,3 +1,4 @@
+import { execSync } from 'node:child_process';
 import { resolve } from 'node:path';
 import tailwindcss from '@tailwindcss/vite';
 import react from '@vitejs/plugin-react';
@@ -25,6 +26,17 @@ function productionCsp(): Plugin {
   };
 }
 
+/** Shown under the version in the sidebar, so the operator can tell which build is installed. */
+function buildId(): string {
+  let commit = 'dev';
+  try {
+    commit = execSync('git rev-parse --short HEAD', { stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim() || commit;
+  } catch {
+    // Not a git checkout; keep "dev".
+  }
+  return `${new Date().toISOString().slice(0, 10)} · ${commit}`;
+}
+
 const alias = { '@shared': resolve(import.meta.dirname, 'shared'), '@': resolve(import.meta.dirname, 'src') };
 
 export default defineConfig({
@@ -47,6 +59,7 @@ export default defineConfig({
     root: '.',
     resolve: { alias },
     plugins: [react(), tailwindcss(), productionCsp()],
+    define: { __BUILD_ID__: JSON.stringify(buildId()) },
     build: {
       rollupOptions: { input: { index: resolve(import.meta.dirname, 'index.html') } },
     },

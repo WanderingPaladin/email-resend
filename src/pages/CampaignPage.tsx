@@ -9,6 +9,7 @@ import { CampaignConfirmation } from '@/components/CampaignConfirmation';
 import { CampaignProgress } from '@/components/CampaignProgress';
 import { CampaignResults } from '@/components/CampaignResults';
 import { ContactsPreview } from '@/components/ContactsPreview';
+import { BatchSizeInput } from '@/components/BatchSizeInput';
 import { EmailTemplateEditor } from '@/components/EmailTemplateEditor';
 import { TemplatePicker } from '@/components/TemplatePicker';
 import { Alert } from '@/components/ui/badge';
@@ -244,15 +245,8 @@ export function CampaignPage({
             <Field label="From Email">
               <Input value={form.fromEmail} disabled={locked} onChange={(e) => update('fromEmail', e.target.value)} />
             </Field>
-            <Field label="Email limit" hint={`Emails this campaign sends at most (${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE.toLocaleString()})`}>
-              <Input
-                type="number"
-                min={MIN_BATCH_SIZE}
-                max={MAX_BATCH_SIZE}
-                value={form.batchSize}
-                disabled={locked}
-                onChange={(e) => update('batchSize', Number(e.target.value))}
-              />
+            <Field label="Batch size (emails per campaign)" hint={`Any number from ${MIN_BATCH_SIZE} to ${MAX_BATCH_SIZE.toLocaleString()}`}>
+              <BatchSizeInput value={form.batchSize} disabled={locked} onChange={(v) => update('batchSize', Number(v))} />
             </Field>
             <Field label="Concurrency" hint={`${MIN_CONCURRENCY}–${MAX_CONCURRENCY}`}>
               <Input

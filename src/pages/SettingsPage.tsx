@@ -14,6 +14,7 @@ import { EmailProviderSettings } from '@/components/EmailProviderSettings';
 import { OpenAiSettings } from '@/components/OpenAiSettings';
 import { Alert } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { BatchSizeInput } from '@/components/BatchSizeInput';
 import { Card, CardBody, CardHeader } from '@/components/ui/card';
 import { Field, Input } from '@/components/ui/form';
 import type { ConfigHook } from '@/hooks/useConfig';
@@ -117,8 +118,8 @@ function CampaignDefaults({ configHook }: { configHook: ConfigHook }) {
       <CardHeader title="Campaign Defaults" />
       <CardBody className="space-y-4">
         <div className="grid grid-cols-4 gap-4">
-          <Field label="Email limit per campaign" hint={`${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE.toLocaleString()}`}>
-            <Input type="number" min={MIN_BATCH_SIZE} max={MAX_BATCH_SIZE} value={batchSize} onChange={(e) => setBatchSize(e.target.value)} />
+          <Field label="Default batch size" hint={`Emails per campaign, ${MIN_BATCH_SIZE}–${MAX_BATCH_SIZE.toLocaleString()}`}>
+            <BatchSizeInput value={batchSize} onChange={setBatchSize} />
           </Field>
           <Field label="Concurrency" hint={`${MIN_CONCURRENCY}–${MAX_CONCURRENCY} parallel sends`}>
             <Input type="number" min={MIN_CONCURRENCY} max={MAX_CONCURRENCY} value={concurrency} onChange={(e) => setConcurrency(e.target.value)} />

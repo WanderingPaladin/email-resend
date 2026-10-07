@@ -52,7 +52,10 @@ export function AppSidebar({
           </button>
         ))}
       </nav>
-      <div className="px-5 py-4 text-xs text-slate-400">v{version}</div>
+      <div className="px-5 py-4 text-xs text-slate-400">
+        <div>v{version}</div>
+        <div title="Build date and code version">{`Build ${__BUILD_ID__}`}</div>
+      </div>
     </aside>
   );
 }
